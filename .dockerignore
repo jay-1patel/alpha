@@ -1,0 +1,33 @@
+# Env / secrets
+.env
+**/.env
+routing/.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Node / frontend
+node_modules/
+whatsapp-admin/dist/
+
+# Data / runtime
+*.db
+*.sqlite
+*.log
+backend/uploaded_files/
+backend/faq.db
+backend/models/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build
+*.egg

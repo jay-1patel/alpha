@@ -1,0 +1,227 @@
+import os
+import sys
+
+_project_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, _project_root)
+sys.path.insert(0, os.path.join(_project_root, "routing"))
+
+import logging
+import asyncio
+import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
+from database import init_db
+from fastapi.responses import FileResponse
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from routing.config import ROUTER_PORT
+from routing import classify_query
+from routing.message import forward_to_bot
+from routes.chat import router as chat_router
+from routes.faqs import router as faqs_router
+from routes.status import router as status_router
+from routes.admin import router as admin_router
+from routes.auth import router as auth_router
+from routes.chat_admin import router as chat_admin_router
+from routing import webhook_router
+from faq.router import faq_router
+from kb.router import kb_router
+from routes.catalog import router as catalog_router
+from routes.distributors import router as distributors_router
+from routes.campaigns import router as campaigns_router
+from routes.unified import router as unified_router
+from routes.inbox import router as inbox_router
+from routes.dynamic_config import router as dynamic_config_router
+from routes.orders import router as orders_router
+from routes.complaints import router as complaints_router
+from services.handoff_timeout import handoff_timeout_monitor
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("router")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("[STARTUP] lifespan entered")
+    init_db()
+    logger.info("[STARTUP] init_db done")
+
+    from faq.service import faq_index
+    logger.info(f"[STARTUP] faq_index id={id(faq_index)}, is_built={faq_index.is_built}")
+
+    try:
+        faq_index.build()
+        logger.info(f"[STARTUP] build() returned, is_built={faq_index.is_built}, "
+                    f"ntotal={getattr(faq_index.index, 'ntotal', 'no-index')}")
+        if faq_index.is_built:
+            logger.info(f"FAQ index built: {faq_index.index.ntotal} vectors")
+        else:
+            logger.warning("FAQ index build returned but index not marked as built")
+    except Exception as exc:
+        logger.error(f"FAQ index init FAILED: {exc}", exc_info=True)
+
+    try:
+        from kb.services.rag import build_chunks_for_kb, rebuild_faiss_index, generate_missing_embeddings
+        build_chunks_for_kb()
+        generate_missing_embeddings()
+        rebuild_faiss_index()
+        logger.info("[STARTUP] KB index built")
+    except Exception as exc:
+        logger.warning(f"KB index init skipped: {exc}", exc_info=True)
+
+    try:
+        from kb.services.rag import rebuild_product_faiss_index
+        rebuild_product_faiss_index()
+        logger.info("[STARTUP] Product FAISS index built")
+    except Exception as exc:
+        logger.warning(f"Product index init skipped: {exc}", exc_info=True)
+
+    # Start the handoff timeout monitor
+    handoff_stop_event = asyncio.Event()
+    handoff_task = asyncio.create_task(handoff_timeout_monitor(handoff_stop_event))
+    logger.info("[STARTUP] Handoff timeout monitor started (1h auto-revert)")
+
+    # Start the cart/checkout TTL cleanup loop (7-day carts, 15-min checkouts)
+    cart_cleanup_stop_event = asyncio.Event()
+    cart_cleanup_task = asyncio.create_task(cart_cleanup_monitor(cart_cleanup_stop_event))
+    logger.info("[STARTUP] Cart/checkout TTL cleanup monitor started")
+
+    try:
+        yield
+    finally:
+        handoff_stop_event.set()
+        handoff_task.cancel()
+        try:
+            await handoff_task
+        except asyncio.CancelledError:
+            pass
+        cart_cleanup_stop_event.set()
+        cart_cleanup_task.cancel()
+        try:
+            await cart_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("[SHUTDOWN] Server stopped")
+
+
+async def cart_cleanup_monitor(stop_event: asyncio.Event = None) -> None:
+    """Hourly cleanup of expired carts and checkout sessions."""
+    while not (stop_event and stop_event.is_set()):
+        try:
+            from services.cart_service import cleanup_expired
+            counts = cleanup_expired()
+            if counts.get("carts") or counts.get("checkouts"):
+                logger.info(f"CART_CLEANUP | expired carts={counts['carts']} checkouts={counts['checkouts']}")
+        except Exception as exc:
+            logger.error(f"CART_CLEANUP_MONITOR_FAIL: {exc}")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=3600)
+        except asyncio.TimeoutError:
+            continue
+        except asyncio.CancelledError:
+            raise
+
+app = FastAPI(
+    title="Leeway Softtech Chatbot Service", 
+    version="2.0.0", 
+    lifespan=lifespan,
+    # Enforce HTTPS for all connections
+    https_redirect=True,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    # Restricted CORS to specific trusted origins only
+    # Wildcard (*) allows any website to make cross-origin requests
+    allow_origins=os.getenv("CORS_ORIGINS", "https://your-production-domain.com,https://your-admin-domain.com,http://localhost:3000,http://127.0.0.1:3000").split(","),
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Accept-Language", "X-Requested-With"],
+    allow_credentials=True,
+)
+
+# Security: Add TrustedHostMiddleware for host header validation
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["localhost", "127.0.0.1", "0.0.0.0"]
+)
+
+
+app.include_router(chat_router, tags=["chat"])
+app.include_router(faqs_router, tags=["faqs"])
+app.include_router(status_router, tags=["status"])
+app.include_router(admin_router, tags=["admin"])
+app.include_router(auth_router, tags=["auth"])
+app.include_router(chat_admin_router, tags=["chat-admin"])
+app.include_router(webhook_router, prefix="/webhook", tags=["webhook"])
+app.include_router(faq_router, tags=["faq"])
+app.include_router(kb_router, tags=["kb"])
+app.include_router(catalog_router, tags=["catalog"])
+app.include_router(distributors_router, tags=["distributors"])
+app.include_router(campaigns_router, tags=["campaigns"])
+app.include_router(unified_router, tags=["unified"])
+app.include_router(inbox_router, tags=["inbox"])
+app.include_router(dynamic_config_router, tags=["dynamic-config"])
+app.include_router(orders_router, tags=["orders"])
+app.include_router(complaints_router, tags=["complaints"])
+
+IMAGES_DIR = os.path.join(os.path.dirname(__file__), "images")
+if os.path.isdir(IMAGES_DIR):
+    app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
+
+UPLOADED_DIR = os.path.join(os.path.dirname(__file__), "uploaded_files")
+if os.path.isdir(UPLOADED_DIR):
+    app.mount("/uploaded_files", StaticFiles(directory=UPLOADED_DIR), name="uploaded-files")
+
+ADMIN_BUILD_DIR = os.path.join(os.path.dirname(__file__), "admin_build")
+
+@app.get("/")
+def root():
+    return {
+        "status": "Unified Bot Service running",
+    }
+
+@app.get("/chat-history")
+def legacy_chat_history():
+    """Legacy compatibility route used by old admin panel."""
+    from database import get_db
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM chat_history ORDER BY created_at DESC LIMIT 50").fetchall()
+        return {"history": [dict(row) for row in rows]}
+    finally:
+        conn.close()
+
+@app.post("/classify")
+async def classify(request: Request):
+    body = await request.json()
+    text = body.get("message", "")
+    return {"message": text, "type": classify_query(text)}
+
+@app.post("/forward")
+async def forward(request: Request):
+    body = await request.json()
+    text = body.get("message", "")
+    qtype = body.get("type") or classify_query(text)
+    answer = await forward_to_bot(qtype, text)
+    return {"type": qtype, "answer": answer}
+
+
+if os.path.isdir(ADMIN_BUILD_DIR):
+    app.mount("/assets", StaticFiles(directory=os.path.join(ADMIN_BUILD_DIR, "assets")), name="admin-assets")
+
+    @app.get("/admin")
+    @app.get("/admin/{full_path:path}")
+    def serve_admin(full_path: str = ""):
+        file_path = os.path.join(ADMIN_BUILD_DIR, full_path)
+        if full_path and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(ADMIN_BUILD_DIR, "index.html"))
+
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=ROUTER_PORT, reload=False)

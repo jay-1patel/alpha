@@ -1,0 +1,296 @@
+/* ============================================================================
+   Leeway Softech Theme Styles
+   This file contains custom CSS to match the Leeway Softech website theme
+   ============================================================================ */
+
+/* Global Styles */
+:root {
+  --leeway-primary: #134CBC;
+  --leeway-primary-dark: #0F3A8C;
+  --leeway-primary-light: rgba(19, 76, 188, 0.1);
+  --leeway-secondary: #139C32;
+  --leeway-secondary-light: rgba(19, 156, 50, 0.1);
+  --leeway-accent-green: #ABDBD1;
+  --leeway-red: #E31E25;
+  --leeway-white: #FFFFFF;
+  --leeway-black: #000000;
+  --leeway-gray: #666666;
+  --leeway-light-gray: #f8f9fa;
+}
+
+/* Ensure Poppins font is applied everywhere */
+html,
+body,
+h1, h2, h3, h4, h5, h6,
+p, span, div, input, select, textarea, button,
+label,
+ начали {
+  font-family: 'Poppins', sans-serif !important;
+}
+
+/* Background Pattern (mimicking Leeway site) */
+.pattern-leeway {
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23134cbc' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Card Styles - Matching Leeway site */
+.leeway-card {
+  background: var(--leeway-white);
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  border: none;
+}
+
+.leeway-card:hover {
+  box-shadow: 0 16px 24px 15px rgba(0, 0, 0, 0.05);
+  transform: translateY(-4px);
+}
+
+/* Button Styles */
+.leeway-btn {
+  font-family: 'Poppins', sans-serif;
+  font-weight: 600;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.leeway-btn-primary {
+  background: var(--leeway-primary);
+  color: var(--leeway-white);
+}
+
+.leeway-btn-primary:hover {
+  background: var(--leeway-primary-dark);
+  box-shadow: 0 4px 12px rgba(19, 76, 188, 0.3);
+}
+
+.leeway-btn-secondary {
+  background: var(--leeway-secondary);
+  color: var(--leeway-white);
+}
+
+.leeway-btn-secondary:hover {
+  background: #0f7a25;
+  box-shadow: 0 4px 12px rgba(19, 156, 50, 0.3);
+}
+
+.leeway-btn-outline {
+  background: transparent;
+  border: 2px solid var(--leeway-primary);
+  color: var(--leeway-primary);
+}
+
+.leeway-btn-outline:hover {
+  background: var(--leeway-primary-light);
+}
+
+/* Header Styles */
+.leeway-header {
+  background: var(--leeway-white);
+  box-shadow: 0 15px 50px 0 rgba(19, 76, 188, 0.05);
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+}
+
+/* Sidebar Styles */
+.leeway-sidebar {
+  background: var(--leeway-white);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+}
+
+/* Navigation Item Styles */
+.leeway-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.leeway-nav-item:hover {
+  background: var(--leeway-primary-light);
+  color: var(--leeway-primary);
+}
+
+.leeway-nav-item.active {
+  background: var(--leeway-primary);
+  color: var(--leeway-white);
+  box-shadow: 0 4px 8px rgba(19, 76, 188, 0.2);
+}
+
+/* Sidebar Footer Styles */
+.leeway-sidebar-footer {
+  background: var(--leeway-primary-light);
+  border-top: 1px solid rgba(19, 76, 188, 0.1);
+  padding: 1rem;
+}
+
+/* User Profile Avatar */
+.leeway-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--leeway-primary);
+  color: var(--leeway-white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+/* Toast Notification Styles */
+.leeway-toast {
+  font-family: 'Poppins', sans-serif;
+  border-radius: 10px;
+  box-shadow: 0 16px 24px 15px rgba(19, 76, 188, 0.1);
+}
+
+.leeway-toast-success {
+  background: var(--leeway-secondary-light);
+  border: 2px solid var(--leeway-secondary);
+  color: var(--leeway-secondary);
+}
+
+.leeway-toast-error {
+  background: rgba(227, 30, 37, 0.1);
+  border: 2px solid var(--leeway-red);
+  color: var(--leeway-red);
+}
+
+/* Table Styles */
+.leeway-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Poppins', sans-serif;
+}
+
+.leeway-table th {
+  background: var(--leeway-primary-light);
+  color: var(--leeway-primary);
+  font-weight: 600;
+  padding: 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--leeway-primary-light);
+}
+
+.leeway-table td {
+  padding: 1rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.leeway-table tr:hover {
+  background: rgba(19, 76, 188, 0.02);
+}
+
+/* Form Input Styles */
+.leeway-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.95rem;
+  transition: all 0.3s ease;
+}
+
+.leeway-input:focus {
+  outline: none;
+  border-color: var(--leeway-primary);
+  box-shadow: 0 0 0 2px var(--leeway-primary-light);
+}
+
+/* Card Header Styles */
+.leeway-card-header {
+  border-bottom: 1px solid rgba(19, 76, 188, 0.1);
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+}
+
+.leeway-card-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--leeway-black);
+  margin: 0;
+}
+
+/* Badge Styles */
+.leeway-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.leeway-badge-primary {
+  background: var(--leeway-primary-light);
+  color: var(--leeway-primary);
+}
+
+.leeway-badge-success {
+  background: var(--leeway-secondary-light);
+  color: var(--leeway-secondary);
+}
+
+.leeway-badge-danger {
+  background: rgba(227, 30, 37, 0.1);
+  color: var(--leeway-red);
+}
+
+/* Utility Classes */
+.text-leeway-primary { color: var(--leeway-primary); }
+.text-leeway-secondary { color: var(--leeway-secondary); }
+.text-leeway-red { color: var(--leeway-red); }
+.text-leeway-muted { color: var(--leeway-gray); }
+
+.bg-leeway-primary { background-color: var(--leeway-primary); }
+.bg-leeway-secondary { background-color: var(--leeway-secondary); }
+.bg-leeway-red { background-color: var(--leeway-red); }
+.bg-leeway-light { background-color: var(--leeway-light-gray); }
+
+.border-leeway-primary { border-color: var(--leeway-primary); }
+
+/* Animation Classes */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 1024px) {
+  .leeway-nav-item span {
+    display: none;
+  }
+  
+  .leeway-nav-item {
+    justify-content: center;
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .leeway-header {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  }
+}

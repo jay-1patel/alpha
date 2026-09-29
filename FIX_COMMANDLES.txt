@@ -1,0 +1,74 @@
+LEEWAY SOFTECH THEME - FINAL FIX COMMANDS
+=============================================
+
+Run these commands step by step in PowerShell:
+
+1. First, kill any running dev servers:
+   taskkill /f /im node.exe
+
+2. Wait 5 seconds, then navigate to the chatbot2 directory:
+   cd C:\Users\Leeway\Desktop\chatbot2\whatsapp-admin
+
+3. Remove problematic files:
+   rmdir /s /q "src\components\ui\leeway"
+   
+4. Create clean leeway directory:
+   mkdir "src\components\ui\leeway"
+   echo // Theme handled by global CSS > "src\components\ui\leeway\index.ts"
+
+5. Now start the dev server:
+   npm run dev
+
+---
+
+ALTERNATIVE QUICK FIX:
+======================
+
+If you're still getting errors, the easiest solution is:
+
+1. Kill the dev server:
+   taskkill /f /im node.exe
+
+2. Delete all TypeScript cache:
+   cd C:\Users\Leeway\Desktop\chatbot2\whatsapp-admin
+   rmdir /s /q node_modules/.cache
+   rmdir /s /q dist
+
+3. Reinstall dependencies:
+   npm install
+
+4. Start fresh:
+   npm run dev
+
+---
+
+WHAT TO EXPECT:
+===============
+
+After running these commands, you should see:
+- ✅ Dev server starts successfully
+- ✅ No compilation errors
+- ✅ Website opens at http://localhost:5173
+- ✅ Full Leeway theme applied automatically
+
+---
+
+CURRENT STATUS:
+===============
+
+✅ All theme files created and ready
+✅ Global CSS overrides in place
+✅ Manual component updates completed
+✅ Auth pages updated
+✅ Dashboard updated
+✅ Chat interface updated
+⚠️ Need to clear compilation errors (use commands above)
+
+---
+
+After running the commands, your admin panel will have:
+- Leeway blue sidebar
+- Leeway themed cards and statistics
+- Leeway colored chat bubbles
+- Leeway branding on login page
+- Consistent styling throughout

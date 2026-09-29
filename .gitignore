@@ -1,0 +1,52 @@
+# --- Environment & secrets ---
+.env
+*.env
+!.env.example
+
+# --- Python ---
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg
+
+# --- Node / frontend ---
+node_modules/
+dist/
+build/
+*.log
+
+# --- Databases ---
+*.db
+*.sqlite
+*.sqlite3
+faq.db
+chatbot.db
+
+# --- Runtime / logs ---
+*.log
+*.err
+backend_start.log
+backend_start.err.log
+*.pid
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Uploaded / media (runtime data) ---
+backend/uploaded_files/
+
+venv/
+node_modules/
+backend/models/
+__pycache__/
+*.pyc

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Leeway Softech Logo - Placeholder -->
+  <defs>
+    <linearGradient id="leewayGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#134CBC"/>
+      <stop offset="100%" style="stop-color:#0F3A8C"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background Circle -->
+  <circle cx="100" cy="100" r="90" fill="url(#leewayGradient)" opacity="0.9"/>
+  
+  <!-- L Shape -->
+  <path d="M60 60 L60 130 L120 130 L120 110 L80 110 L80 80 L120 80 L120 60 Z" fill="white"/>
+  
+  <!-- Text -->
+  <text x="100" y="175" text-anchor="middle" fill="white" font-family="Poppins, Arial, sans-serif" font-size="14" font-weight="600">LEEWAY</text>
+</svg>

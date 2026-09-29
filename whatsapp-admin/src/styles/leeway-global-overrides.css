@@ -1,0 +1,367 @@
+/* ============================================================================
+   Leeway Softech Global Theme Overrides
+   This file applies Leeway Softech theme to all components globally
+   ============================================================================ */
+
+/* Import Leeway color palette */
+@import './theme.css';
+
+/* ============================================================================
+   Root CSS Variables for Leeway Theme
+   ============================================================================ */
+
+:root {
+  /* Primary Colors */
+  --leeway-primary: #134CBC;
+  --leeway-primary-dark: #0F3A8C;
+  --leeway-primary-light: rgba(19, 76, 188, 0.1);
+  --leeway-primary-50: rgba(19, 76, 188, 0.05);
+  --leeway-primary-100: rgba(19, 76, 188, 0.15);
+  --leeway-primary-500: #134CBC;
+  --leeway-primary-600: #0F3A8C;
+  
+  /* Secondary Colors */
+  --leeway-secondary: #139C32;
+  --leeway-secondary-light: rgba(19, 156, 50, 0.1);
+  --leeway-secondary-50: rgba(19, 156, 50, 0.1);
+  --leeway-secondary-500: #139C32;
+  --leeway-secondary-600: #0f7a25;
+  
+  /* Accent Colors */
+  --leeway-accent-green: #ABDBD1;
+  --leeway-red: #E31E25;
+  --leeway-white: #FFFFFF;
+  --leeway-black: #000000;
+  --leeway-gray: #666666;
+  --leeway-light-gray: #f8f9fa;
+  
+  /* Shadows */
+  --leeway-shadow-sm: 0 4px 8px rgba(0, 0, 0, 0.1);
+  --leeway-shadow-md: 0 16px 24px 15px rgba(0, 0, 0, 0.05);
+  --leeway-shadow-lg: 0 15px 50px 0 rgba(19, 76, 188, 0.05);
+  --leeway-shadow-blue: 0 16px 24px 15px rgba(19, 76, 188, 0.1);
+  --leeway-shadow-green: 0 16px 24px 15px rgba(1, 145, 67, 0.1);
+}
+
+/* ============================================================================
+   Base Typography - Apply Poppins Font Globally
+   ============================================================================ */
+
+html,
+body,
+h1, h2, h3, h4, h5, h6,
+p, span, div, a, button, input, select, textarea, label,
+nav, aside, main, header, footer,
+section, article, details, summary {
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+/* ============================================================================
+   Color Overrides - Apply Leeway Color Palette
+   ============================================================================ */
+
+/* Text colors */
+.text-primary-500,
+.text-leeway-primary { color: var(--leeway-primary-500) !important; }
+.text-primary-600 { color: var(--leeway-primary-600) !important; }
+.text-secondary-500,
+.text-leeway-secondary { color: var(--leeway-secondary-500) !important; }
+.text-leeway-red { color: var(--leeway-red) !important; }
+.text-leeway-gray { color: var(--leeway-gray) !important; }
+
+/* Background colors */
+.bg-primary-50 { background-color: var(--leeway-primary-50) !important; }
+.bg-primary-500,
+.bg-leeway-primary { background-color: var(--leeway-primary-500) !important; }
+.bg-primary-600 { background-color: var(--leeway-primary-600) !important; }
+.bg-secondary-50 { background-color: var(--leeway-secondary-50) !important; }
+.bg-secondary-500,
+.bg-leeway-secondary { background-color: var(--leeway-secondary-500) !important; }
+.bg-leeway-accent-green { background-color: var(--leeway-accent-green) !important; }
+.bg-leeway-red { background-color: var(--leeway-red) !important; }
+.bg-leeway-light { background-color: var(--leeway-light-gray) !important; }
+
+/* Border colors */
+.border-primary-500,
+.border-leeway-primary { border-color: var(--leeway-primary-500) !important; }
+.border-secondary-500 { border-color: var(--leeway-secondary-500) !important; }
+.border-leeway-red { border-color: var(--leeway-red) !important; }
+
+/* Shadow overrides */
+.shadow-leeway-sm { box-shadow: var(--leeway-shadow-sm) !important; }
+.shadow-leeway-md { box-shadow: var(--leeway-shadow-md) !important; }
+.shadow-leeway-lg { box-shadow: var(--leeway-shadow-lg) !important; }
+.shadow-leeway-blue { box-shadow: var(--leeway-shadow-blue) !important; }
+.shadow-leeway-green { box-shadow: var(--leeway-shadow-green) !important; }
+
+/* ============================================================================
+   Form Elements - Leeway Theme
+   ============================================================================ */
+
+/* Input fields */
+input,
+select,
+textarea {
+  background-color: var(--leeway-white) !important;
+  border-color: rgba(0, 0, 0, 0.2) !important;
+  color: var(--leeway-black) !important;
+  font-size: 0.95rem !important;
+  border-radius: 0.5rem !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 2px var(--leeway-primary-light) !important;
+  border-color: var(--leeway-primary-500) !important;
+}
+
+/* Buttons */
+button {
+  font-family: 'Poppins', sans-serif !important;
+  font-weight: 600 !important;
+  border-radius: 0.5rem !important;
+  transition: all 0.3s ease !important;
+}
+
+/* Primary buttons */
+.bg-primary-500,
+.bg-leeway-primary {
+  background-color: var(--leeway-primary-500) !important;
+  color: var(--leeway-white) !important;
+  border: none !important;
+}
+
+.bg-primary-500:hover,
+.bg-leeway-primary:hover {
+  background-color: var(--leeway-primary-600) !important;
+  box-shadow: 0 4px 12px rgba(19, 76, 188, 0.3) !important;
+}
+
+/* Secondary buttons */
+.bg-secondary-500,
+.bg-leeway-secondary {
+  background-color: var(--leeway-secondary-500) !important;
+  color: var(--leeway-white) !important;
+}
+
+.bg-secondary-500:hover,
+.bg-leeway-secondary:hover {
+  background-color: var(--leeway-secondary-600) !important;
+  box-shadow: 0 4px 12px rgba(19, 156, 50, 0.3) !important;
+}
+
+/* Outline buttons */
+.border-2.border-primary-500 {
+  background: transparent !important;
+  border-color: var(--leeway-primary-500) !important;
+  color: var(--leeway-primary-500) !important;
+}
+
+/* ============================================================================
+   Sidebar & Navigation - Leeway Theme
+   ============================================================================ */
+
+/* Sidebar styling */
+aside,
+.sidebar-leeway {
+  background: var(--leeway-white) !important;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Navigation items */
+.nav-item-leeway {
+  display: flex !important;
+  align-items: center !important;
+  gap: 1rem !important;
+  padding: 1rem !important;
+  border-radius: 0.5rem !important;
+  transition: all 0.3s ease !important;
+}
+
+.nav-item-leeway:hover {
+  background: var(--leeway-primary-light) !important;
+  color: var(--leeway-primary-500) !important;
+}
+
+.nav-item-leeway.active {
+  background: var(--leeway-primary-500) !important;
+  color: var(--leeway-white) !important;
+  box-shadow: 0 4px 8px rgba(19, 76, 188, 0.2) !important;
+}
+
+/* ============================================================================
+   Cards - Leeway Theme
+   ============================================================================ */
+
+.card-leeway {
+  background: var(--leeway-white) !important;
+  border-radius: 0.5rem !important;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1) !important;
+  transition: all 0.3s ease !important;
+}
+
+.card-leeway:hover {
+  box-shadow: 0 16px 24px 15px rgba(0, 0, 0, 0.05) !important;
+  transform: translateY(-4px) !important;
+}
+
+/* ============================================================================
+   Header - Leeway Theme
+   ============================================================================ */
+
+.leeway-header {
+  background: var(--leeway-white) !important;
+  box-shadow: 0 15px 50px 0 rgba(19, 76, 188, 0.05) !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 1000 !important;
+}
+
+/* ============================================================================
+   Badges & Status Indicators - Leeway Theme
+   ============================================================================ */
+
+.leeway-badge {
+  display: inline-block !important;
+  padding: 0.25rem 0.75rem !important;
+  border-radius: 9999px !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+}
+
+.leeway-badge-primary {
+  background: var(--leeway-primary-light) !important;
+  color: var(--leeway-primary-500) !important;
+}
+
+.leeway-badge-success {
+  background: var(--leeway-secondary-light) !important;
+  color: var(--leeway-secondary-500) !important;
+}
+
+.leeway-badge-danger {
+  background: rgba(227, 30, 37, 0.1) !important;
+  color: var(--leeway-red) !important;
+}
+
+/* ============================================================================
+   Table Styling - Leeway Theme
+   ============================================================================ */
+
+.leeway-table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  font-family: 'Poppins', sans-serif !important;
+}
+
+.leeway-table th {
+  background: var(--leeway-primary-light) !important;
+  color: var(--leeway-primary-500) !important;
+  font-weight: 600 !important;
+  padding: 1rem !important;
+  text-align: left !important;
+  border-bottom: 1px solid var(--leeway-primary-light) !important;
+}
+
+.leeway-table td {
+  padding: 1rem !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+}
+
+.leeway-table tr:hover {
+  background: rgba(19, 76, 188, 0.02) !important;
+}
+
+/* ============================================================================
+   Toast Notifications - Leeway Theme
+   ============================================================================ */
+
+.leeway-toast {
+  font-family: 'Poppins', sans-serif !important;
+  border-radius: 10px !important;
+  box-shadow: 0 16px 24px 15px rgba(19, 76, 188, 0.1) !important;
+}
+
+.leeway-toast-success {
+  background: var(--leeway-secondary-light) !important;
+  border: 2px solid var(--leeway-secondary-500) !important;
+  color: var(--leeway-secondary-500) !important;
+}
+
+.leeway-toast-error {
+  background: rgba(227, 30, 37, 0.1) !important;
+  border: 2px solid var(--leeway-red) !important;
+  color: var(--leeway-red) !important;
+}
+
+/* ============================================================================
+   Scrollbar - Leeway Theme
+   ============================================================================ */
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--leeway-light-gray);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--leeway-primary-500);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--leeway-primary-600);
+}
+
+/* ============================================================================
+   Utility Classes
+   ============================================================================ */
+
+.text-leeway-muted { color: var(--leeway-gray) !important; }
+.text-leeway-light-text { color: #999 !important; }
+
+.bg-leeway-light { background-color: var(--leeway-light-gray) !important; }
+
+/* ============================================================================
+   Animation Classes
+   ============================================================================ */
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out;
+}
+
+/* ============================================================================
+   Responsive Adjustments
+   ============================================================================ */
+
+@media (max-width: 1024px) {
+  .leeway-nav-item span {
+    display: none !important;
+  }
+  
+  .leeway-nav-item {
+    justify-content: center !important;
+    padding: 1rem !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .leeway-header {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+  }
+}

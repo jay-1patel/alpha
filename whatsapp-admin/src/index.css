@@ -1,0 +1,255 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+/* Import theme-specific styles */
+@import './styles/leeway-theme.css';
+@import './styles/global.css';
+@import './styles/leeway-global-overrides.css';
+
+/* ============================================================================
+   Tailwind CSS Directives
+   ============================================================================ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   Root Variables - Leeway Softech Theme
+   ============================================================================ */
+
+:root {
+  --background: 210 45% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 207 100% 35%; /* #134CBC in HSL */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 155 60% 40%; /* #139C32 in HSL */
+  --secondary-foreground: 0 0% 100%;
+  --muted: 0 0% 96.1%;
+  --muted-foreground: 0 0% 45.1%;
+  --accent: 0 0% 100%;
+  --accent-foreground: 0 0% 9%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 89.8%;
+  --input: 0 0% 89.8%;
+  --ring: 207 100% 35%;
+  --radius: 0.5rem;
+  --chart-1: 12 76% 61%;
+  --chart-2: 173 58% 39%;
+  --chart-3: 197 37% 24%;
+  --chart-4: 43 74% 66%;
+  --chart-5: 27 87% 67%;
+}
+
+.dark {
+  --background: 222 30% 7%;
+  --foreground: 210 40% 98%;
+  --card: 222 25% 10%;
+  --card-foreground: 210 40% 98%;
+  --popover: 0 0% 3.9%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 207 100% 35%;
+  --secondary: 0 0% 14.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 14.9%;
+  --muted-foreground: 0 0% 63.9%;
+  --accent: 0 0% 14.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 14.9%;
+  --input: 0 0% 14.9%;
+  --ring: 0 0% 83.1%;
+}
+
+/* ============================================================================
+   Base Styles
+   ============================================================================ */
+
+* {
+  @apply border-border;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-background text-foreground;
+  font-family: 'Poppins', 'Inter', sans-serif;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: #000000;
+}
+
+/* Leeway specific typography */
+h1, h2, h3, h4, h5, h6, p, input, select, textarea, button {
+  font-family: 'Poppins', sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #134cbc;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #0f3a8c;
+}
+
+/* ============================================================================
+   Leeway Typography
+   ============================================================================ */
+
+@layer base {
+  h1 { font-size: 1.875rem; font-weight: 700; color: #000; }
+  h2 { font-size: 1.5rem; font-weight: 700; color: #000; }
+  h3 { font-size: 1.25rem; font-weight: 600; color: #000; }
+  h4 { font-size: 1.125rem; font-weight: 600; color: #000; }
+  h5 { font-size: 1rem; font-weight: 600; color: #000; }
+  h6 { font-size: 0.875rem; font-weight: 600; color: #666; }
+  
+  input, select, textarea, button {
+    font-size: 0.95rem;
+  }
+}
+
+/* ============================================================================
+   Component Styles
+   ============================================================================ */
+
+@layer components {
+  /* Leeway-styled buttons */
+  .btn-leeway {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2
+           rounded-md font-medium transition-all duration-200
+           focus:outline-none focus:ring-2 focus:ring-offset-2;
+  }
+
+  .btn-primary {
+    @apply btn-leeway bg-primary-500 text-white
+           hover:bg-primary-600
+           focus:ring-primary-500;
+  }
+
+  .btn-secondary {
+    @apply btn-leeway bg-secondary-500 text-white
+           hover:bg-secondary-600
+           focus:ring-secondary-500;
+  }
+
+  .btn-outline {
+    @apply btn-leeway bg-transparent border-2 border-primary-500 text-primary-500
+           hover:bg-primary-50 hover:border-primary-600
+           focus:ring-primary-500;
+  }
+
+  .btn-danger {
+    @apply btn-leeway bg-red-500 text-white
+           hover:bg-red-600
+           focus:ring-red-500;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-sm;
+  }
+
+  .btn-lg {
+    @apply px-6 py-3 text-lg;
+  }
+
+  /* Leeway-styled cards */
+  .card-leeway {
+    @apply bg-white rounded-lg shadow-leeway-sm p-6
+           transition-all duration-200;
+  }
+
+  .card-leeway:hover {
+    @apply shadow-leeway-md;
+  }
+
+  /* Header styles */
+  .header-leeway {
+    @apply bg-white shadow-leeway-lg sticky top-0 z-50;
+  }
+
+  /* Sidebar styles */
+  .sidebar-leeway {
+    @apply bg-white shadow-md;
+  }
+
+  /* Gradient backgrounds */
+  .nav-active {
+    @apply bg-primary-500 text-white shadow-sm;
+  }
+
+  .gradleeway-instagram {
+    @apply bg-gradient-to-r from-yellow-400 via-red-500 to-blue-600;
+  }
+}
+
+/* ============================================================================
+   Utility Classes
+   ============================================================================ */
+
+@layer utilities {
+  /* Leeway text colors */
+  .text-leeway-primary { color: #134CBC; }
+  .text-leeway-secondary { color: #139C32; }
+  .text-leeway-muted { color: #666; }
+  .text-leeway-light { color: #999; }
+
+  /* Leeway background colors */
+  .bg-leeway-primary { background-color: #134CBC; }
+  .bg-leeway-secondary { background-color: #139C32; }
+  .bg-leeway-primary-light { background-color: rgba(19, 76, 188, 0.1); }
+  .bg-leeway-secondary-light { background-color: rgba(1, 145, 67, 0.1); }
+  .bg-leeway-red { background-color: #E31E25; }
+  .bg-leeway-accent-green { background-color: #ABDBD1; }
+
+  /* Border colors */
+  .border-leeway-primary { border-color: #134CBC; }
+  .border-leeway-secondary { border-color: #139C32; }
+  .border-leeway-red { border-color: #E31E25; }
+
+  /* Helper classes from Leeway site */
+  .w-100-perc { width: 100%; }
+  .pt-2-perc { padding-top: 2%; }
+  .color-134CBC { color: #134CBC; }
+  .color-139C32 { color: #139C32; }
+  .color-E31E25 { color: #E31E25; }
+  
+  /* Animation for sidebar */
+  .sidebar-transition {
+    transition: transform 0.3s ease-in-out;
+  }
+  
+  /* Card hover effect */
+  .card-hover {
+    transition: all 0.3s ease;
+  }
+  
+  .card-hover:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  }
+  
+  /* Button hover effect */
+  .btn-hover {
+    transition: all 0.2s ease;
+  }
+}

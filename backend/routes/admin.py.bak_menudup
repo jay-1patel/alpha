@@ -1,0 +1,2157 @@
+import os
+import json
+import base64
+import logging
+import aiohttp
+from pathlib import Path
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from database import (
+    get_files_summary, delete_file_chunks, delete_knowledge_base_file, save_chunks, get_db, get_db_context,
+    list_admin_files, list_products, get_products_by_category, save_admin_file, delete_admin_file,
+    save_product, update_product, delete_product,
+    create_menu_item, get_menu_item, get_menu_item_by_id, list_menu_items, update_menu_item, delete_menu_item,
+)
+from extract import process_file, results_to_chunks
+from routes.auth import get_current_admin, has_permission, require_permission
+from fastapi.concurrency import run_in_threadpool
+
+logger = logging.getLogger("chiki_webhook")
+router = APIRouter(prefix="/api/admin")
+
+UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploaded_files"))
+SUPPORTED = (".pdf", ".docx", ".doc", ".txt", ".xlsx", ".xls")
+
+
+def _find_uploaded_file(filename: str) -> str | None:
+    for root, _, files in os.walk(UPLOAD_DIR):
+        if filename in files:
+            return os.path.join(root, filename)
+    return None
+
+
+def _guess_media_type(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    return {
+        ".pdf": "application/pdf",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".txt": "text/plain",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".doc": "application/msword",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xls": "application/vnd.ms-excel",
+    }.get(ext, "application/octet-stream")
+
+
+# ── Menu Manager HTML Template ─────────────────────────────────────────────
+
+MENU_MANAGER_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Menu Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            color: #7f8c8d;
+        }
+
+        .form-section, .table-section {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #34495e;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .hint {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+            padding: 8px 16px;
+            font-size: 12px;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .badge-text { background: #3498db; color: white; }
+        .badge-rag { background: #9b59b6; color: white; }
+        .badge-menu { background: #2ecc71; color: white; }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #7f8c8d;
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            border-left: 4px solid #e74c3c;
+        }
+
+        .success {
+            background: #efe;
+            color: #3c3;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            border-left: 4px solid #2ecc71;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .form-section, .table-section {
+                padding: 15px;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            th, td {
+                padding: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📱 WhatsApp Menu Manager</h1>
+            <p>Manage your dynamic WhatsApp bot menus - no code deployment needed!</p>
+        </div>
+
+        <!-- Form Section -->
+        <div class="form-section">
+            <h2 class="section-title">Add New Menu Item</h2>
+
+            <div id="message-container"></div>
+
+            <form id="menu-form">
+                <div class="form-group">
+                    <label for="title">Button Text *</label>
+                    <input type="text" id="title" name="title" required maxlength="24" placeholder="e.g., 'View Products'">
+                    <div class="hint">Max 24 characters - this is what users will see on WhatsApp</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="payload">Payload ID *</label>
+                    <input type="text" id="payload" name="payload" required placeholder="e.g., 'menu_001'">
+                    <div class="hint">Unique identifier for this menu item (e.g., menu_001, action_products)</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="action_type">Action Type *</label>
+                    <select id="action_type" name="action_type" required>
+                        <option value="">Select action type...</option>
+                        <option value="text">text - Display static message</option>
+                        <option value="rag">rag - Search knowledge base</option>
+                        <option value="menu">menu - Show sub-menu options</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="action_data">Action Data *</label>
+                    <textarea id="action_data" name="action_data" required placeholder="Enter action data..."></textarea>
+                    <div class="hint" id="action_data_hint">Select an action type to see hint</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="parent_id">Parent Menu (Optional)</label>
+                    <select id="parent_id" name="parent_id">
+                        <option value="">None - Root level menu</option>
+                    </select>
+                    <div class="hint">Select a parent menu to create nested sub-menus</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="section">Section (Optional)</label>
+                    <input type="text" id="section" name="section" placeholder="e.g., 'Products'">
+                    <div class="hint">Group related menu items together</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="sort_order">Sort Order</label>
+                    <input type="number" id="sort_order" name="sort_order" value="0" min="0">
+                    <div class="hint">Lower numbers appear first</div>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Add Menu Item</button>
+            </form>
+        </div>
+
+        <!-- Table Section -->
+        <div class="table-section">
+            <h2 class="section-title">Existing Menu Items</h2>
+
+            <div id="table-loading" class="loading">Loading menu items...</div>
+            <div id="table-container"></div>
+        </div>
+    </div>
+
+    <script>
+        // API Configuration
+        const API_BASE = '/api/admin';
+        const CSRF_TOKEN = getCsrfToken();
+
+        function getCsrfToken() {
+            // Try to get CSRF token from meta tag or cookie
+            const metaTag = document.querySelector('meta[name="csrf-token"]');
+            if (metaTag) return metaTag.getAttribute('content');
+
+            // Fallback to cookie
+            const match = document.cookie.match(/csrf_token=([^;]+)/);
+            return match ? match[1] : '';
+        }
+
+        // Action type hints
+        const ACTION_HINTS = {
+            text: 'Enter the message text to display to users (max 4096 characters)',
+            rag: 'Enter the collection name to search in the knowledge base (e.g., "faq", "kb") or JSON config like {"collection": "faq", "query": "shipping"}',
+            menu: 'Enter the parent ID for sub-menu or leave empty for root menu. Can also be JSON like {"parent_id": 5}'
+        };
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadMenuItems();
+            loadParentMenus();
+            setupActionTypeListener();
+            setupFormSubmit();
+        });
+
+        // Setup action type change listener
+        function setupActionTypeListener() {
+            const actionTypeSelect = document.getElementById('action_type');
+            const actionDataHint = document.getElementById('action_data_hint');
+
+            actionTypeSelect.addEventListener('change', function() {
+                const selectedType = this.value;
+                if (ACTION_HINTS[selectedType]) {
+                    actionDataHint.textContent = ACTION_HINTS[selectedType];
+                } else {
+                    actionDataHint.textContent = 'Select an action type to see hint';
+                }
+
+                // Update placeholder
+                const actionDataTextarea = document.getElementById('action_data');
+                switch(selectedType) {
+                    case 'text':
+                        actionDataTextarea.placeholder = 'Enter your message here...';
+                        break;
+                    case 'rag':
+                        actionDataTextarea.placeholder = 'faq';
+                        break;
+                    case 'menu':
+                        actionDataTextarea.placeholder = 'Enter parent ID or leave empty for root menu';
+                        break;
+                    default:
+                        actionDataTextarea.placeholder = 'Enter action data...';
+                }
+            });
+        }
+
+        // Setup form submission
+        function setupFormSubmit() {
+            document.getElementById('menu-form').addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                const formData = {
+                    title: document.getElementById('title').value.trim(),
+                    payload: document.getElementById('payload').value.trim(),
+                    action_type: document.getElementById('action_type').value,
+                    action_data: document.getElementById('action_data').value.trim(),
+                    parent_id: document.getElementById('parent_id').value || null,
+                    section: document.getElementById('section').value.trim() || null,
+                    sort_order: parseInt(document.getElementById('sort_order').value) || 0
+                };
+
+                // Convert parent_id to null if empty
+                if (formData.parent_id === '') {
+                    formData.parent_id = null;
+                } else {
+                    formData.parent_id = parseInt(formData.parent_id);
+                }
+
+                try {
+                    showMessage('Creating menu item...', 'info');
+
+                    const response = await fetch(`${API_BASE}/menus`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(formData)
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        showMessage('Menu item created successfully!', 'success');
+                        document.getElementById('menu-form').reset();
+                        loadMenuItems(); // Refresh table
+                        loadParentMenus(); // Refresh parent dropdown
+                    } else {
+                        showMessage(`Error: ${result.detail || 'Failed to create menu item'}`, 'error');
+                    }
+
+                } catch (error) {
+                    showMessage(`Network error: ${error.message}`, 'error');
+                }
+            });
+        }
+
+        // Load menu items
+        async function loadMenuItems() {
+            const tableContainer = document.getElementById('table-container');
+            const loadingDiv = document.getElementById('table-loading');
+
+            try {
+                const response = await fetch(`${API_BASE}/menus`);
+                const result = await response.json();
+
+                loadingDiv.style.display = 'none';
+
+                if (!result.menus || result.menus.length === 0) {
+                    tableContainer.innerHTML = '<div class="empty-state">No menu items found. Add your first menu item above!</div>';
+                    return;
+                }
+
+                const tableHTML = createMenuTable(result.menus);
+                tableContainer.innerHTML = tableHTML;
+
+                // Setup delete buttons
+                setupDeleteButtons();
+
+            } catch (error) {
+                loadingDiv.style.display = 'none';
+                tableContainer.innerHTML = `<div class="error">Error loading menu items: ${error.message}</div>`;
+            }
+        }
+
+        // Create menu table HTML
+        function createMenuTable(menuItems) {
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Title</th>
+                            <th>Payload</th>
+                            <th>Action Type</th>
+                            <th>Action Data</th>
+                            <th>Parent ID</th>
+                            <th>Section</th>
+                            <th>Active</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            menuItems.forEach(item => {
+                const badgeClass = `badge-${item.action_type}`;
+                const displayActionData = truncateText(item.action_data, 50);
+                const isInactive = !item.is_active;
+
+                html += `
+                    <tr style="${isInactive ? 'opacity: 0.6;' : ''}">
+                        <td>${item.id}</td>
+                        <td>${escapeHtml(item.title)}</td>
+                        <td><code>${escapeHtml(item.payload)}</code></td>
+                        <td><span class="badge ${badgeClass}">${item.action_type}</span></td>
+                        <td title="${escapeHtml(item.action_data)}">${escapeHtml(displayActionData)}</td>
+                        <td>${item.parent_id || '-'}</td>
+                        <td>${escapeHtml(item.section || '-')}</td>
+                        <td>${item.is_active ? '✓' : '✗'}</td>
+                        <td>
+                            <button class="btn btn-danger delete-btn" data-payload="${escapeHtml(item.payload)}">
+                                Delete
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            return html;
+        }
+
+        // Load parent menus for dropdown
+        async function loadParentMenus() {
+            const parentSelect = document.getElementById('parent_id');
+
+            try {
+                const response = await fetch(`${API_BASE}/menus`);
+                const result = await response.json();
+
+                // Keep the "None" option and add root menus
+                const currentSelection = parentSelect.value;
+                parentSelect.innerHTML = '<option value="">None - Root level menu</option>';
+
+                if (result.menus && result.menus.length > 0) {
+                    const rootMenus = result.menus.filter(item => !item.parent_id);
+
+                    rootMenus.forEach(item => {
+                        const option = document.createElement('option');
+                        option.value = item.id;
+                        option.textContent = `${item.title} (${item.payload})`;
+                        if (item.id === parseInt(currentSelection)) {
+                            option.selected = true;
+                        }
+                        parentSelect.appendChild(option);
+                    });
+                }
+
+            } catch (error) {
+                console.error('Error loading parent menus:', error);
+            }
+        }
+
+        // Setup delete button handlers
+        function setupDeleteButtons() {
+            const deleteButtons = document.querySelectorAll('.delete-btn');
+
+            deleteButtons.forEach(button => {
+                button.addEventListener('click', async function() {
+                    const payload = this.getAttribute('data-payload');
+
+                    if (!confirm(`Are you sure you want to delete menu item: ${payload}?`)) {
+                        return;
+                    }
+
+                    try {
+                        showMessage('Deleting menu item...', 'info');
+
+                        const response = await fetch(`${API_BASE}/menus/${encodeURIComponent(payload)}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (response.ok) {
+                            showMessage('Menu item deleted successfully!', 'success');
+                            loadMenuItems(); // Refresh table
+                            loadParentMenus(); // Refresh parent dropdown
+                        } else {
+                            const result = await response.json();
+                            showMessage(`Error: ${result.detail || 'Failed to delete menu item'}`, 'error');
+                        }
+
+                    } catch (error) {
+                        showMessage(`Network error: ${error.message}`, 'error');
+                    }
+                });
+            });
+        }
+
+        // Show message to user
+        function showMessage(message, type = 'info') {
+            const container = document.getElementById('message-container');
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type === 'error' ? 'error' : (type === 'success' ? 'success' : 'loading');
+            messageDiv.textContent = message;
+
+            container.innerHTML = '';
+            container.appendChild(messageDiv);
+
+            // Auto-hide success messages after 5 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    messageDiv.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        // Utility functions
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function truncateText(text, maxLength) {
+            if (!text) return '';
+            if (text.length <= maxLength) return text;
+            return text.substring(0, maxLength) + '...';
+        }
+    </script>
+</body>
+</html>
+"""
+
+
+# ── Menu Manager Admin Interface ─────────────────────────────────────────────
+
+@router.get("/menu-manager")
+async def menu_manager_page():
+    """Serve the admin panel for managing dynamic menus - accessible at /api/admin/menu-manager (NO AUTH for testing)"""
+    return HTMLResponse(content=MENU_MANAGER_HTML)
+
+
+@router.get("/menu-manager-secure")
+async def menu_manager_page_secure(current_admin: dict = Depends(get_current_admin)):
+    """Serve the admin panel for managing dynamic menus - REQUIRES AUTHENTICATION - accessible at /api/admin/menu-manager-secure"""
+    return HTMLResponse(content=MENU_MANAGER_HTML)
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Menu Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            color: #7f8c8d;
+        }
+
+        .form-section, .table-section {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #34495e;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .hint {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+            padding: 8px 16px;
+            font-size: 12px;
+        }
+
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #2c3e50;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .badge-text { background: #3498db; color: white; }
+        .badge-rag { background: #9b59b6; color: white; }
+        .badge-menu { background: #2ecc71; color: white; }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #7f8c8d;
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            border-left: 4px solid #e74c3c;
+        }
+
+        .success {
+            background: #efe;
+            color: #3c3;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            border-left: 4px solid #2ecc71;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .form-section, .table-section {
+                padding: 15px;
+            }
+
+            table {
+                font-size: 12px;
+            }
+
+            th, td {
+                padding: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📱 WhatsApp Menu Manager</h1>
+            <p>Manage your dynamic WhatsApp bot menus - no code deployment needed!</p>
+        </div>
+
+        <!-- Form Section -->
+        <div class="form-section">
+            <h2 class="section-title">Add New Menu Item</h2>
+
+            <div id="message-container"></div>
+
+            <form id="menu-form">
+                <div class="form-group">
+                    <label for="title">Button Text *</label>
+                    <input type="text" id="title" name="title" required maxlength="24" placeholder="e.g., 'View Products'">
+                    <div class="hint">Max 24 characters - this is what users will see on WhatsApp</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="payload">Payload ID *</label>
+                    <input type="text" id="payload" name="payload" required placeholder="e.g., 'menu_001'">
+                    <div class="hint">Unique identifier for this menu item (e.g., menu_001, action_products)</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="action_type">Action Type *</label>
+                    <select id="action_type" name="action_type" required>
+                        <option value="">Select action type...</option>
+                        <option value="text">text - Display static message</option>
+                        <option value="rag">rag - Search knowledge base</option>
+                        <option value="menu">menu - Show sub-menu options</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="action_data">Action Data *</label>
+                    <textarea id="action_data" name="action_data" required placeholder="Enter action data..."></textarea>
+                    <div class="hint" id="action_data_hint">Select an action type to see hint</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="parent_id">Parent Menu (Optional)</label>
+                    <select id="parent_id" name="parent_id">
+                        <option value="">None - Root level menu</option>
+                    </select>
+                    <div class="hint">Select a parent menu to create nested sub-menus</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="section">Section (Optional)</label>
+                    <input type="text" id="section" name="section" placeholder="e.g., 'Products'">
+                    <div class="hint">Group related menu items together</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="sort_order">Sort Order</label>
+                    <input type="number" id="sort_order" name="sort_order" value="0" min="0">
+                    <div class="hint">Lower numbers appear first</div>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Add Menu Item</button>
+            </form>
+        </div>
+
+        <!-- Table Section -->
+        <div class="table-section">
+            <h2 class="section-title">Existing Menu Items</h2>
+
+            <div id="table-loading" class="loading">Loading menu items...</div>
+            <div id="table-container"></div>
+        </div>
+    </div>
+
+    <script>
+        // API Configuration
+        const API_BASE = '/api/admin';
+        const CSRF_TOKEN = getCsrfToken();
+
+        function getCsrfToken() {
+            // Try to get CSRF token from meta tag or cookie
+            const metaTag = document.querySelector('meta[name="csrf-token"]');
+            if (metaTag) return metaTag.getAttribute('content');
+
+            // Fallback to cookie
+            const match = document.cookie.match(/csrf_token=([^;]+)/);
+            return match ? match[1] : '';
+        }
+
+        // Action type hints
+        const ACTION_HINTS = {
+            text: 'Enter the message text to display to users (max 4096 characters)',
+            rag: 'Enter the collection name to search in the knowledge base (e.g., "faq", "kb") or JSON config like {"collection": "faq", "query": "shipping"}',
+            menu: 'Enter the parent ID for sub-menu or leave empty for root menu. Can also be JSON like {"parent_id": 5}'
+        };
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadMenuItems();
+            loadParentMenus();
+            setupActionTypeListener();
+            setupFormSubmit();
+        });
+
+        // Setup action type change listener
+        function setupActionTypeListener() {
+            const actionTypeSelect = document.getElementById('action_type');
+            const actionDataHint = document.getElementById('action_data_hint');
+
+            actionTypeSelect.addEventListener('change', function() {
+                const selectedType = this.value;
+                if (ACTION_HINTS[selectedType]) {
+                    actionDataHint.textContent = ACTION_HINTS[selectedType];
+                } else {
+                    actionDataHint.textContent = 'Select an action type to see hint';
+                }
+
+                // Update placeholder
+                const actionDataTextarea = document.getElementById('action_data');
+                switch(selectedType) {
+                    case 'text':
+                        actionDataTextarea.placeholder = 'Enter your message here...';
+                        break;
+                    case 'rag':
+                        actionDataTextarea.placeholder = 'faq';
+                        break;
+                    case 'menu':
+                        actionDataTextarea.placeholder = 'Enter parent ID or leave empty for root menu';
+                        break;
+                    default:
+                        actionDataTextarea.placeholder = 'Enter action data...';
+                }
+            });
+        }
+
+        // Setup form submission
+        function setupFormSubmit() {
+            document.getElementById('menu-form').addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                const formData = {
+                    title: document.getElementById('title').value.trim(),
+                    payload: document.getElementById('payload').value.trim(),
+                    action_type: document.getElementById('action_type').value,
+                    action_data: document.getElementById('action_data').value.trim(),
+                    parent_id: document.getElementById('parent_id').value || null,
+                    section: document.getElementById('section').value.trim() || null,
+                    sort_order: parseInt(document.getElementById('sort_order').value) || 0
+                };
+
+                // Convert parent_id to null if empty
+                if (formData.parent_id === '') {
+                    formData.parent_id = null;
+                } else {
+                    formData.parent_id = parseInt(formData.parent_id);
+                }
+
+                try {
+                    showMessage('Creating menu item...', 'info');
+
+                    const response = await fetch(`${API_BASE}/menus`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(formData)
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        showMessage('Menu item created successfully!', 'success');
+                        document.getElementById('menu-form').reset();
+                        loadMenuItems(); // Refresh table
+                        loadParentMenus(); // Refresh parent dropdown
+                    } else {
+                        showMessage(`Error: ${result.detail || 'Failed to create menu item'}`, 'error');
+                    }
+
+                } catch (error) {
+                    showMessage(`Network error: ${error.message}`, 'error');
+                }
+            });
+        }
+
+        // Load menu items
+        async function loadMenuItems() {
+            const tableContainer = document.getElementById('table-container');
+            const loadingDiv = document.getElementById('table-loading');
+
+            try {
+                const response = await fetch(`${API_BASE}/menus`);
+                const result = await response.json();
+
+                loadingDiv.style.display = 'none';
+
+                if (!result.menus || result.menus.length === 0) {
+                    tableContainer.innerHTML = '<div class="empty-state">No menu items found. Add your first menu item above!</div>';
+                    return;
+                }
+
+                const tableHTML = createMenuTable(result.menus);
+                tableContainer.innerHTML = tableHTML;
+
+                // Setup delete buttons
+                setupDeleteButtons();
+
+            } catch (error) {
+                loadingDiv.style.display = 'none';
+                tableContainer.innerHTML = `<div class="error">Error loading menu items: ${error.message}</div>`;
+            }
+        }
+
+        // Create menu table HTML
+        function createMenuTable(menuItems) {
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Title</th>
+                            <th>Payload</th>
+                            <th>Action Type</th>
+                            <th>Action Data</th>
+                            <th>Parent ID</th>
+                            <th>Section</th>
+                            <th>Active</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            menuItems.forEach(item => {
+                const badgeClass = `badge-${item.action_type}`;
+                const displayActionData = truncateText(item.action_data, 50);
+                const isInactive = !item.is_active;
+
+                html += `
+                    <tr style="${isInactive ? 'opacity: 0.6;' : ''}">
+                        <td>${item.id}</td>
+                        <td>${escapeHtml(item.title)}</td>
+                        <td><code>${escapeHtml(item.payload)}</code></td>
+                        <td><span class="badge ${badgeClass}">${item.action_type}</span></td>
+                        <td title="${escapeHtml(item.action_data)}">${escapeHtml(displayActionData)}</td>
+                        <td>${item.parent_id || '-'}</td>
+                        <td>${escapeHtml(item.section || '-')}</td>
+                        <td>${item.is_active ? '✓' : '✗'}</td>
+                        <td>
+                            <button class="btn btn-danger delete-btn" data-payload="${escapeHtml(item.payload)}">
+                                Delete
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            return html;
+        }
+
+        // Load parent menus for dropdown
+        async function loadParentMenus() {
+            const parentSelect = document.getElementById('parent_id');
+
+            try {
+                const response = await fetch(`${API_BASE}/menus`);
+                const result = await response.json();
+
+                // Keep the "None" option and add root menus
+                const currentSelection = parentSelect.value;
+                parentSelect.innerHTML = '<option value="">None - Root level menu</option>';
+
+                if (result.menus && result.menus.length > 0) {
+                    const rootMenus = result.menus.filter(item => !item.parent_id);
+
+                    rootMenus.forEach(item => {
+                        const option = document.createElement('option');
+                        option.value = item.id;
+                        option.textContent = `${item.title} (${item.payload})`;
+                        if (item.id === parseInt(currentSelection)) {
+                            option.selected = true;
+                        }
+                        parentSelect.appendChild(option);
+                    });
+                }
+
+            } catch (error) {
+                console.error('Error loading parent menus:', error);
+            }
+        }
+
+        // Setup delete button handlers
+        function setupDeleteButtons() {
+            const deleteButtons = document.querySelectorAll('.delete-btn');
+
+            deleteButtons.forEach(button => {
+                button.addEventListener('click', async function() {
+                    const payload = this.getAttribute('data-payload');
+
+                    if (!confirm(`Are you sure you want to delete menu item: ${payload}?`)) {
+                        return;
+                    }
+
+                    try {
+                        showMessage('Deleting menu item...', 'info');
+
+                        const response = await fetch(`${API_BASE}/menus/${encodeURIComponent(payload)}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (response.ok) {
+                            showMessage('Menu item deleted successfully!', 'success');
+                            loadMenuItems(); // Refresh table
+                            loadParentMenus(); // Refresh parent dropdown
+                        } else {
+                            const result = await response.json();
+                            showMessage(`Error: ${result.detail || 'Failed to delete menu item'}`, 'error');
+                        }
+
+                    } catch (error) {
+                        showMessage(`Network error: ${error.message}`, 'error');
+                    }
+                });
+            });
+        }
+
+        // Show message to user
+        function showMessage(message, type = 'info') {
+            const container = document.getElementById('message-container');
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type === 'error' ? 'error' : (type === 'success' ? 'success' : 'loading');
+            messageDiv.textContent = message;
+
+            container.innerHTML = '';
+            container.appendChild(messageDiv);
+
+            // Auto-hide success messages after 5 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    messageDiv.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        // Utility functions
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function truncateText(text, maxLength) {
+            if (!text) return '';
+            if (text.length <= maxLength) return text;
+            return text.substring(0, maxLength) + '...';
+        }
+    </script>
+</body>
+</html>
+    """
+
+    return HTMLResponse(content=html_content)
+
+
+# ── Dashboard stats (available to every authenticated admin) ─────────────
+
+@router.get("/dashboard/stats")
+def dashboard_stats(current_admin: dict = Depends(get_current_admin)):
+    """Overview stats for the dashboard. Requires only a valid admin token."""
+    files = list_admin_files()
+    kb_count = len([f for f in files if f.get("module") == "kb"])
+    faq_count = len([f for f in files if f.get("module") == "faq"])
+
+    try:
+        product_count = len(list_products(limit=10000))
+    except Exception:
+        logger.exception("Failed to count products for dashboard")
+        product_count = 0
+
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT message, COUNT(*) as count
+               FROM chat_history
+               WHERE created_at >= DATE('now', '-7 days')
+               GROUP BY LOWER(message)
+               ORDER BY count DESC
+               LIMIT 7""",
+        ).fetchall()
+        questions = [{"query": r["message"], "count": r["count"]} for r in rows]
+    finally:
+        conn.close()
+
+    return {
+        "kb_files": kb_count,
+        "faq_files": faq_count,
+        "products": product_count,
+        "top_questions": questions,
+    }
+
+
+@router.get("/logs")
+def get_logs(
+    direction: str = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+
+):
+    conn = get_db()
+    try:
+        if direction:
+            rows = conn.execute(
+                "SELECT * FROM webhook_logs WHERE direction = ? ORDER BY created_at DESC LIMIT ?",
+                (direction, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM webhook_logs ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+@router.delete("/logs")
+def clear_logs(current_admin: dict = Depends(require_permission("view_logs"))):
+    with get_db_context() as conn:
+        conn.execute("DELETE FROM webhook_logs")
+    return {"status": "ok", "message": "Logs cleared"}
+
+
+# ── Rebuild FAISS index + generate missing embeddings (no restart needed) ─
+
+@router.post("/rebuild-index")
+async def rebuild_index(background_tasks: bool = Query(False), current_admin: dict = Depends(get_current_admin)):
+    """
+    Rebuild all FAISS indexes and generate any missing embeddings.
+    Runs in background by default so the endpoint returns immediately.
+    Pass ?background_tasks=false to run synchronously (slower response).
+    """
+    def _do_rebuild():
+        results = {}
+
+        # 1. Rebuild KB chunks + missing embeddings + FAISS
+        try:
+            from kb.services.rag import build_chunks_for_kb, rebuild_faiss_index, generate_missing_embeddings
+            build_chunks_for_kb()
+            results["kb_chunks"] = "ok"
+        except Exception as e:
+            logger.error(f"KB build_chunks_for_kb failed: {e}")
+            results["kb_chunks"] = f"error: {e}"
+
+        try:
+            from kb.services.rag import generate_missing_embeddings
+            generate_missing_embeddings()
+            results["kb_embeddings"] = "ok"
+        except Exception as e:
+            logger.error(f"KB generate_missing_embeddings failed: {e}")
+            results["kb_embeddings"] = f"error: {e}"
+
+        try:
+            from kb.services.rag import rebuild_faiss_index
+            rebuild_faiss_index()
+            results["kb_faiss"] = "ok"
+        except Exception as e:
+            logger.error(f"KB rebuild_faiss_index failed: {e}")
+            results["kb_faiss"] = f"error: {e}"
+
+        # 2. Rebuild FAQ index (hybrid dense+sparse+reranker)
+        try:
+            from faq.service import faq_index
+            faq_index.build()
+            results["faq_index"] = "ok"
+            results["faq_vectors"] = faq_index.index.ntotal if faq_index.is_built else 0
+        except Exception as e:
+            logger.error(f"FAQ index build failed: {e}")
+            results["faq_index"] = f"error: {e}"
+
+        # 3. Rebuild backend in-memory FAQ KB store
+        try:
+            from services.rag import build_index_from_db
+            build_index_from_db()
+            results["backend_faq_store"] = "ok"
+        except Exception as e:
+            logger.error(f"Backend FAQ store rebuild failed: {e}")
+            results["backend_faq_store"] = f"error: {e}"
+
+        return results
+
+    if background_tasks:
+        import threading
+        threading.Thread(target=_do_rebuild, daemon=True).start()
+        return {"status": "rebuild_started", "detail": "Index rebuild running in background. Check logs for completion."}
+    else:
+        results = await run_in_threadpool(_do_rebuild)
+        return {"status": "ok", "results": results}
+
+
+# ── Dynamic Menu System ───────────────────────────────────────────────────
+
+@router.get("/action-types")
+def get_action_types_api(
+    current_admin: dict = Depends(require_permission("view_files")),
+):
+    """
+    Return the simplified list of allowed action types for the admin frontend.
+    Returns: ["text", "rag", "menu"]
+    """
+    try:
+        from kb.services.dynamic_router import get_allowed_action_types
+
+        action_types = get_allowed_action_types()
+
+        return {
+            "status": "ok",
+            "action_types": action_types
+        }
+    except Exception as e:
+        logger.error(f"Error fetching action types: {e}")
+        return {
+            "status": "error",
+            "action_types": [],
+            "error": str(e)
+        }
+
+
+@router.get("/actions")
+def get_available_actions(
+    current_admin: dict = Depends(require_permission("view_files")),
+):
+    """
+    DEPRECATED: This endpoint is maintained for backward compatibility.
+    New systems should use /admin/action-types instead.
+    """
+    return get_action_types_api(current_admin=current_admin)
+
+
+@router.get("/menus")
+def list_menu_items_api(
+    menu_type: str = Query(None),
+    section: str = Query(None),
+    active_only: bool = Query(True),
+    parent_id: int = Query(None),
+    action_type: str = Query(None),
+    current_admin: dict = Depends(require_permission("view_files")),
+):
+    """List all menu items with optional filtering."""
+    try:
+        menus = list_menu_items(
+            menu_type=menu_type,
+            section=section,
+            active_only=active_only,
+            parent_id=parent_id,
+            action_type=action_type
+        )
+
+        # Build tree structure for nested menus
+        tree = _build_menu_tree(menus)
+
+        # Group by section for better display
+        grouped = {}
+        for menu in menus:
+            section_name = menu.get("section", "General")
+            if section_name not in grouped:
+                grouped[section_name] = []
+            grouped[section_name].append(menu)
+
+        return {
+            "status": "ok",
+            "menus": menus,
+            "tree": tree,
+            "grouped": grouped,
+            "total": len(menus)
+        }
+    except Exception as e:
+        logger.error(f"Error listing menu items: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/menus")
+def create_menu_item_api(
+    data: dict,
+    current_admin: dict = Depends(require_permission("upload_faq")),
+):
+    """Create a new dynamic menu item with comprehensive validation."""
+    try:
+        # Extract and validate required fields
+        title = data.get("title", "").strip()
+        payload = data.get("payload", "").strip()
+        action_type = data.get("action_type", "text").strip().lower()
+        action_data = data.get("action_data", "").strip()
+        parent_id = data.get("parent_id")
+        menu_type = data.get("menu_type", "main").strip()
+        section = data.get("section", "General").strip()
+        sort_order = data.get("sort_order", 0)
+
+        # Validate required fields
+        if not title:
+            raise HTTPException(status_code=400, detail="title is required")
+        if not payload:
+            raise HTTPException(status_code=400, detail="payload is required")
+
+        # Validate title length (WhatsApp limit)
+        if len(title) > 24:
+            raise HTTPException(status_code=400, detail="title must be 24 characters or less")
+
+        # Validate action_type against allowed types
+        from kb.services.dynamic_router import get_allowed_action_types
+        allowed_types = get_allowed_action_types()
+        if action_type not in allowed_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid action_type '{action_type}'. Must be one of: {allowed_types}"
+            )
+
+        # Validate action_data based on action_type
+        if action_type == "menu":
+            # For menu actions, action_data should be a parent_id or "null"/"root"
+            if action_data and action_data.lower() not in ["null", "none", "root", ""]:
+                try:
+                    # Validate it's a valid integer
+                    test_parent_id = int(action_data)
+                    # Check parent exists
+                    parent_check = get_menu_item_by_id(test_parent_id)
+                    if not parent_check:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Parent menu item with id {test_parent_id} not found"
+                        )
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="For 'menu' action_type, action_data must be a valid parent_id or 'null'"
+                    )
+        elif action_type == "rag":
+            # For RAG actions, action_data should be a collection name or JSON config
+            if not action_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="action_data is required for 'rag' action_type (collection name or config)"
+                )
+        elif action_type == "text":
+            # For text actions, action_data should be the text to display
+            if not action_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="action_data is required for 'text' action_type (the text to display)"
+                )
+            # Validate text length (WhatsApp limit)
+            if len(action_data) > 4096:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"action_data too long ({len(action_data)} chars). Max 4096 characters."
+                )
+
+        # Validate parent_id if provided separately (for hierarchy)
+        if parent_id is not None:
+            parent_item = get_menu_item_by_id(parent_id)
+            if not parent_item:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Parent menu item with id {parent_id} not found"
+                )
+
+        # Create the menu item
+        menu_id = create_menu_item(
+            title=title,
+            payload=payload,
+            action_type=action_type,
+            action_data=action_data,
+            parent_id=parent_id,
+            menu_type=menu_type,
+            section=section,
+            sort_order=sort_order
+        )
+
+        return {
+            "status": "ok",
+            "id": menu_id,
+            "message": "Dynamic menu item created successfully",
+            "warnings": []
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating menu item: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error creating menu item: {str(e)}")
+
+
+@router.put("/menus/{payload:path}")
+def update_menu_item_api(
+    payload: str,
+    data: dict,
+    current_admin: dict = Depends(require_permission("upload_faq")),
+):
+    """Update an existing menu item."""
+    try:
+        allowed_updates = {"title", "action_type", "action_data", "parent_id",
+                          "menu_type", "section", "sort_order", "is_active"}
+        updates = {k: v for k, v in data.items() if k in allowed_updates}
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+
+        # Validate action_type if being updated
+        if "action_type" in updates:
+            from kb.services.dynamic_router import get_allowed_action_types
+            allowed_types = get_allowed_action_types()
+            if updates["action_type"] not in allowed_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid action_type '{updates['action_type']}'. Must be one of: {allowed_types}"
+                )
+
+        # Validate parent_id if being updated
+        if "parent_id" in updates and updates["parent_id"] is not None:
+            parent_item = get_menu_item_by_id(updates["parent_id"])
+            if not parent_item:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Parent menu item with id {updates['parent_id']} not found"
+                )
+
+        success = update_menu_item(payload, **updates)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Menu item with payload '{payload}' not found")
+
+        return {
+            "status": "ok",
+            "message": "Dynamic menu item updated successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating menu item: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/menus/{payload:path}")
+def delete_menu_item_api(
+    payload: str,
+    current_admin: dict = Depends(require_permission("delete_files")),
+):
+    """Delete a menu item."""
+    try:
+        success = delete_menu_item(payload)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Menu item with payload '{payload}' not found")
+
+        return {
+            "status": "ok",
+            "message": "Dynamic menu item deleted successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting menu item: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _build_menu_tree(menu_items: list) -> dict:
+    """Build hierarchical tree structure from flat menu items."""
+    from collections import defaultdict
+
+    # Group by parent_id
+    by_parent = defaultdict(list)
+    by_id = {}
+
+    for item in menu_items:
+        item_id = item.get("id")
+        parent_id = item.get("parent_id")
+
+        by_id[item_id] = item
+        by_parent[parent_id or None].append(item)
+
+    # Build tree recursively
+    def build_node(parent_id=None):
+        children = []
+        for item in by_parent.get(parent_id, []):
+            item_copy = dict(item)
+            item_copy["children"] = build_node(item.get("id"))
+            children.append(item_copy)
+        return children
+
+    return {
+        "root": build_node(None),
+        "flat": menu_items
+    }
+
+
+# ── Analytics endpoints ───────────────────────────────────────────────────
+
+@router.get("/analytics/response-time")
+def get_response_time_analytics(
+    days: int = Query(7, ge=1, le=90),
+
+):
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT DATE(created_at) as date, AVG(response_time_ms) as avg_ms, COUNT(*) as count
+               FROM webhook_logs
+               WHERE direction = 'outgoing' AND response_time_ms IS NOT NULL
+                 AND created_at >= DATE('now', ?)
+               GROUP BY DATE(created_at)
+               ORDER BY date ASC""",
+            (f"-{days} days",),
+        ).fetchall()
+        return {
+            "days": days,
+            "data": [
+                {
+                    "date": r["date"],
+                    "avg_ms": round(r["avg_ms"], 1) if r["avg_ms"] else 0,
+                    "count": r["count"],
+                }
+                for r in rows
+            ],
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/analytics/frequent-questions")
+def get_frequent_questions(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(20, ge=1, le=100),
+
+):
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT message, COUNT(*) as count, MAX(created_at) as last_asked
+               FROM chat_history
+               WHERE created_at >= DATE('now', ?)
+               GROUP BY LOWER(message)
+               ORDER BY count DESC, last_asked DESC
+               LIMIT ?""",
+            (f"-{days} days", limit),
+        ).fetchall()
+        return {
+            "days": days,
+            "total_unique": len(rows),
+            "questions": [
+                {
+                    "query": r["message"],
+                    "count": r["count"],
+                    "last_asked": r["last_asked"],
+                }
+                for r in rows
+            ],
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/analytics/overview")
+def get_analytics_overview(
+    days: int = Query(7, ge=1, le=90),
+
+):
+    conn = get_db()
+    try:
+        total_messages = conn.execute(
+            """SELECT COUNT(*) as cnt FROM chat_history
+               WHERE created_at >= DATE('now', ?)""",
+            (f"-{days} days",),
+        ).fetchone()["cnt"]
+
+        unique_users = conn.execute(
+            """SELECT COUNT(DISTINCT wa_id) as cnt FROM chat_history
+               WHERE created_at >= DATE('now', ?)""",
+            (f"-{days} days",),
+        ).fetchone()["cnt"]
+
+        avg_response = conn.execute(
+            """SELECT AVG(response_time_ms) as avg_ms FROM webhook_logs
+               WHERE direction = 'outgoing' AND response_time_ms IS NOT NULL
+                 AND created_at >= DATE('now', ?)""",
+            (f"-{days} days",),
+        ).fetchone()["avg_ms"]
+
+        route_breakdown = conn.execute(
+            """SELECT route, COUNT(*) as count FROM chat_history
+               WHERE created_at >= DATE('now', ?)
+               GROUP BY route""",
+            (f"-{days} days",),
+        ).fetchall()
+
+        return {
+            "days": days,
+            "total_messages": total_messages,
+            "unique_users": unique_users,
+            "avg_response_ms": round(avg_response, 1) if avg_response else 0,
+            "route_breakdown": [dict(r) for r in route_breakdown],
+        }
+    finally:
+        conn.close()
+
+
+# ── Top questions ─────────────────────────────────────────────────────────
+
+@router.get("/analytics/top-questions")
+def get_top_questions(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(10, ge=1, le=50),
+
+):
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT message, COUNT(*) as count
+               FROM chat_history
+               WHERE created_at >= DATE('now', ?)
+               GROUP BY LOWER(message)
+               ORDER BY count DESC
+               LIMIT ?""",
+            (f"-{days} days", limit),
+        ).fetchall()
+        total = sum(r["count"] for r in rows)
+        return {
+            "days": days,
+            "total": total,
+            "questions": [
+                {"query": r["message"], "count": r["count"]}
+                for r in rows
+            ],
+        }
+    finally:
+        conn.close()
+
+
+# ── Unanswered queries ────────────────────────────────────────────────────
+
+@router.get("/analytics/unanswered")
+def get_unanswered_queries(
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(20, ge=1, le=100),
+
+):
+    conn = get_db()
+    try:
+        keywords = ("i don't know", "i do not know", "sorry", "unable to find", "couldn't find", "no answer", "not available", "don't have that information")
+        rows = conn.execute(
+            """SELECT message, response, COUNT(*) as count, MAX(created_at) as last_asked
+               FROM chat_history
+               WHERE created_at >= DATE('now', ?)
+                 AND LOWER(response) LIKE ?
+               GROUP BY LOWER(message)
+               ORDER BY count DESC, last_asked DESC
+               LIMIT ?""",
+            (f"-{days} days", f"%{keywords[0]}%", limit),
+        ).fetchall()
+        return {
+            "days": days,
+            "total": len(rows),
+            "queries": [
+                {
+                    "query": r["message"],
+                    "response": r["response"],
+                    "count": r["count"],
+                    "last_asked": r["last_asked"],
+                }
+                for r in rows
+            ],
+        }
+    finally:
+        conn.close()
+
+
+# ── File management ───────────────────────────────────────────────────────
+
+@router.get("/files")
+def list_admin_files_api(
+    module: str = Query(None),
+    search: str = Query(None),
+    current_admin: dict = Depends(require_permission("view_files")),
+):
+    files = list_admin_files()
+    if module:
+        files = [f for f in files if f.get("module") == module]
+    if search:
+        s = search.lower()
+        files = [f for f in files if s in f.get("name", "").lower()]
+    return {"files": files}
+
+
+@router.get("/files/{filename}/preview")
+def preview_admin_file(
+    filename: str,
+    current_admin: dict = Depends(require_permission("view_files")),
+):
+    filepath = _find_uploaded_file(filename)
+    if not filepath:
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type = _guess_media_type(filename)
+    return FileResponse(filepath, media_type=media_type, headers={"Content-Disposition": f"inline; filename=\"{filename}\""})
+
+
+@router.get("/files/{filename}/download")
+def download_admin_file(
+    filename: str,
+    current_admin: dict = Depends(require_permission("view_files")),
+):
+    filepath = _find_uploaded_file(filename)
+    if not filepath:
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type = _guess_media_type(filename)
+    return FileResponse(filepath, filename=filename, media_type=media_type, headers={"Content-Disposition": f"attachment; filename=\"{filename}\""})
+
+
+@router.delete("/files/{filename}")
+def delete_admin_file_api(
+    filename: str,
+    current_admin: dict = Depends(require_permission("delete_files")),
+):
+    filepath = _find_uploaded_file(filename)
+    if not filepath:
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    deleted_faq = delete_file_chunks(filename)
+    deleted_kb = delete_knowledge_base_file(filename)
+    delete_admin_file(filename)
+    try:
+        os.remove(filepath)
+    except OSError:
+        pass
+    logger.info(f"Deleted: {filename} (faq={deleted_faq}, kb={deleted_kb})")
+    return {"status": "ok", "filename": filename, "deleted_faq": deleted_faq, "deleted_kb": deleted_kb}
+
+
+@router.post("/files/upload")
+async def upload_admin_file(
+    request: Request,
+    module: str = Query("faq"),
+    url: str = Query(None),
+    media_type: str = Query(None),
+    current_admin: dict = Depends(get_current_admin),
+):
+    if module == "kb":
+        if not has_permission(current_admin, "upload_kb"):
+            raise HTTPException(status_code=403, detail="You do not have permission to upload KB files")
+    else:
+        if not has_permission(current_admin, "upload_faq"):
+            raise HTTPException(status_code=403, detail="You do not have permission to upload FAQ files")
+    content_type = request.headers.get("content-type", "")
+    filename = ""
+    content = b""
+    is_image = False
+
+    if "application/json" in content_type:
+        body = await request.json()
+        filename = body.get("filename", "")
+        content = base64.b64decode(body.get("content", ""))
+        if not url:
+            url = body.get("url")
+        if not media_type:
+            media_type = body.get("media_type")
+    elif "multipart/form-data" in content_type:
+        form = await request.form()
+        upload = form.get("file")
+        if upload and hasattr(upload, "read"):
+            filename = upload.filename or "unknown"
+            content = await upload.read()
+            if hasattr(upload, "content_type") and upload.content_type and upload.content_type.startswith("image/"):
+                is_image = True
+        url = form.get("url") or url
+        media_type = form.get("media_type") or media_type
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported content type")
+
+    if not filename:
+        raise HTTPException(status_code=400, detail="Missing filename")
+
+    ext = Path(filename).suffix.lower()
+    image_exts = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
+    if ext in image_exts or is_image:
+        # Upload image to ImgBB
+        if not IMGBB_API_KEY:
+            raise HTTPException(status_code=400, detail="ImgBB API key not configured")
+        import io
+        import aiohttp
+        img_payload = aiohttp.FormData()
+        img_payload.add_field("key", IMGBB_API_KEY)
+        img_payload.add_field("action", "upload")
+        img_payload.add_field("image", base64.b64encode(content).decode("utf-8"))
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://api.imgbb.com/1/upload", data=img_payload) as resp:
+                img_data = await resp.json()
+                if not resp.ok or img_data.get("error"):
+                    raise HTTPException(status_code=400, detail=img_data.get("error", {}).get("message", "ImgBB upload failed"))
+                effective_url = img_data["data"]["url"]
+                effective_media_type = media_type or ext.lstrip(".")
+                save_admin_file(filename, ext.lstrip("."), module, len(content), url=effective_url)
+                return {
+                    "status": "ok",
+                    "filename": filename,
+                    "module": module,
+                    "chunks": 0,
+                    "size": len(content),
+                    "file_url": effective_url,
+                }
+
+    if ext not in SUPPORTED:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+    def _process():
+        module_dir = os.path.join(UPLOAD_DIR, module)
+        os.makedirs(module_dir, exist_ok=True)
+        filepath = os.path.join(module_dir, filename)
+        with open(filepath, "wb") as f:
+            f.write(content)
+        size = len(content)
+        save_admin_file(filename, ext.lstrip("."), module, size, file_path=filepath, url=url)
+        chunks = []
+        try:
+            results = process_file(filepath)
+            if results:
+                chunks = results_to_chunks(results)
+                if chunks:
+                    effective_url = url or f"/uploaded_files/{module}/{filename}"
+                    effective_media_type = media_type or ext.lstrip(".")
+                    if module == "kb":
+                        from database import save_knowledge_base_chunks
+                        save_knowledge_base_chunks(chunks, filename, media_url=effective_url, media_type=effective_media_type)
+                    else:
+                        save_chunks(chunks, module=module, media_url=effective_url, media_type=effective_media_type)
+                    if module == "faq":
+                        from faq.service import faq_index
+                        faq_index.build()
+        except Exception as e:
+            logger.error(f"Extraction failed for {filename}: {e}")
+        return {
+            "status": "ok",
+            "filename": filename,
+            "module": module,
+            "chunks": len(chunks),
+            "size": size,
+            "file_url": url or f"/uploaded_files/{module}/{filename}",
+        }
+
+    result = await run_in_threadpool(_process)
+    return result
+
+
+# ── Chat history with user lookup ─────────────────────────────────────────
+
+@router.get("/chat-history")
+def get_chat_history_api(
+    days: int = Query(30, ge=1, le=1095),
+    from_date: str = Query(None),
+    to_date: str = Query(None),
+    search: str = Query(None),
+    current_admin: dict = Depends(require_permission("chat_history")),
+):
+    conn = get_db()
+    try:
+        if from_date and to_date:
+            query = """SELECT ch.*
+                       FROM chat_history ch
+                       WHERE ch.created_at >= ? AND ch.created_at <= ?"""
+            params = [from_date, to_date + " 23:59:59"]
+        else:
+            query = """SELECT ch.*
+                       FROM chat_history ch
+                       WHERE ch.created_at >= DATE('now', ?)"""
+            params = [f"-{days} days"]
+        if search:
+            query += " AND (ch.wa_id LIKE ? OR ch.sender_name LIKE ? OR ch.message LIKE ? OR ch.response LIKE ?)"
+            params.extend([f"%{search}%"] * 4)
+        query += " ORDER BY ch.created_at DESC LIMIT 500"
+        rows = conn.execute(query, params).fetchall()
+        return {"history": [dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+
+# ── Products / Catalogue ──────────────────────────────────────────────────
+
+@router.get("/products")
+def list_products_api(
+    category: str = Query(None),
+    search: str = Query(None),
+    current_admin: dict = Depends(require_permission("view_products")),
+):
+    products = list_products(category=category, active_only=False)
+    if search:
+        s = search.lower()
+        products = [p for p in products if s in p.get("name", "").lower() or s in p.get("description", "").lower()]
+    return {"products": products}
+
+
+@router.post("/products")
+def create_product_api(
+    data: dict,
+    current_admin: dict = Depends(require_permission("edit_delete_products")),
+):
+    name = data.get("name", "")
+    slug = data.get("slug", "")
+    if not name or not slug:
+        raise HTTPException(status_code=400, detail="name and slug are required")
+    pid = save_product(
+        name=name,
+        slug=slug,
+        category=data.get("category", "general"),
+        description=data.get("description", ""),
+        short_description=data.get("short_description", ""),
+        price=data.get("price", ""),
+        mrp=data.get("mrp", ""),
+        unit=data.get("unit", "piece"),
+        moq=data.get("moq", ""),
+        media_url=data.get("media_url"),
+        media_type=data.get("media_type", "image"),
+        tags=data.get("tags", []),
+        sort_order=data.get("sort_order", 0),
+    )
+    return {"status": "ok", "id": pid}
+
+
+@router.put("/products/{product_id}")
+def update_product_api(
+    product_id: int,
+    data: dict,
+    current_admin: dict = Depends(require_permission("edit_delete_products")),
+):
+    allowed = {k: v for k, v in data.items() if k in {
+        "name", "slug", "category", "description", "short_description",
+        "price", "mrp", "unit", "moq", "media_url", "media_type", "tags", "is_active", "sort_order"
+    }}
+    if "tags" in allowed and isinstance(allowed["tags"], list):
+        allowed["tags"] = json.dumps(allowed["tags"])
+    ok = update_product(product_id, **allowed)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Update failed")
+    return {"status": "ok"}
+
+
+@router.delete("/products/{product_id}")
+def delete_product_api(
+    product_id: int,
+    current_admin: dict = Depends(require_permission("edit_delete_products")),
+):
+    ok = delete_product(product_id, hard=True)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Delete failed")
+    return {"status": "ok"}
+
+
+IMGBB_API_KEY = os.environ.get("IMGBB_API_KEY", "bf7acf2f010f81c10cfd08e2305a34ea")
+CATBOX_API_URL = "https://catbox.moe/user/api.php"
+
+
+@router.post("/upload/image")
+async def upload_image_to_imgbb(file: UploadFile = File(...)):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+
+    contents = await file.read()
+    payload = aiohttp.FormData()
+    payload.add_field("key", IMGBB_API_KEY)
+    payload.add_field("action", "upload")
+    payload.add_field("image", base64.b64encode(contents).decode("utf-8"))
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post("https://api.imgbb.com/1/upload", data=payload) as resp:
+            data = await resp.json()
+            if not resp.ok or data.get("error"):
+                raise HTTPException(status_code=400, detail=data.get("error", {}).get("message", "ImgBB upload failed"))
+            url = data["data"]["url"]
+            return {"url": url, "image_id": data["data"]["id"], "media_type": file.content_type}
+
+
+@router.post("/upload/catbox")
+async def upload_to_catbox(file: UploadFile = File(...)):
+    contents = await file.read()
+    payload = aiohttp.FormData()
+    payload.add_field("reqtype", "fileupload")
+    payload.add_field("fileToUpload", contents, filename=file.filename, content_type=file.content_type or "application/octet-stream")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(CATBOX_API_URL, data=payload) as resp:
+            text = await resp.text()
+            if not resp.ok or text.startswith("error"):
+                raise HTTPException(status_code=400, detail=f"Catbox upload failed: {text}")
+            return {"url": text.strip(), "media_type": file.content_type or "application/octet-stream"}
