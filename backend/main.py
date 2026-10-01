@@ -39,6 +39,7 @@ from routes.inbox import router as inbox_router
 from routes.dynamic_config import router as dynamic_config_router
 from routes.dynamic_config import public_router as branding_public_router
 from routes.orders import router as orders_router
+from routes.tenants import router as tenants_router
 from routes.complaints import router as complaints_router
 from services.handoff_timeout import handoff_timeout_monitor
 
@@ -168,6 +169,7 @@ app.include_router(unified_router, tags=["unified"])
 app.include_router(inbox_router, tags=["inbox"])
 app.include_router(dynamic_config_router, tags=["dynamic-config"])
 app.include_router(branding_public_router, tags=["branding"])
+app.include_router(tenants_router, tags=["tenants"])
 app.include_router(orders_router, tags=["orders"])
 app.include_router(complaints_router, tags=["complaints"])
 

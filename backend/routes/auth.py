@@ -146,9 +146,12 @@ def _verify_password(plain: str, hashed: str) -> bool:
 
 
 def _create_token(username: str) -> str:
-    # SECURITY FIX: Add unique token ID (jti) for revocation
+    # SECURITY FIX: Add unique token ID (jti) for revocation.
+    # tenant_id claim scopes every later query to the admin's company.
+    from database import get_tenant_id_for_admin
     payload = {
         "sub": username,
+        "tenant_id": get_tenant_id_for_admin(username),
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(hours=ADMIN_JWT_EXPIRY_HOURS),
         "jti": str(uuid.uuid4()),  # Unique token identifier for revocation
@@ -215,13 +218,19 @@ def get_current_admin(
     payload = _decode_token(token_str)
     username = payload.get("sub")
     with get_db_context() as conn:
+        # tenant_id is selected so downstream routes can scope queries.
         admin = conn.execute(
-            "SELECT id, username, role, permissions, email FROM admins WHERE username = ?", (username,)
+            "SELECT id, username, role, permissions, email, tenant_id FROM admins WHERE username = ?", (username,)
         ).fetchone()
     if not admin:
         raise HTTPException(status_code=401, detail="Admin not found")
     result = dict(admin)
     result["permissions"] = _effective_permissions(result.get("role"), result.get("permissions"))
+    # Prefer the DB tenant; fall back to the JWT claim (issued at login),
+    # then to the default tenant so legacy single-tenant setups keep working.
+    if not result.get("tenant_id"):
+        from database import get_default_tenant_id
+        result["tenant_id"] = payload.get("tenant_id") or get_default_tenant_id()
     return result
 
 
@@ -295,11 +304,12 @@ async def create_first_admin(request: Request, body: FirstAdminRequest):
 
     hashed = _hash_password(body.password)
     role = "super_admin"
+    from database import get_default_tenant_id
     email = (body.email or "").strip() or None
     with get_db_context() as conn:
         conn.execute(
-            "INSERT INTO admins (username, password_hash, role, permissions, email) VALUES (?, ?, ?, ?, ?)",
-            (body.username, hashed, role, json.dumps(SUPER_ADMIN_PERMISSIONS), email),
+            "INSERT INTO admins (username, password_hash, role, permissions, email, tenant_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (body.username, hashed, role, json.dumps(SUPER_ADMIN_PERMISSIONS), email, get_default_tenant_id()),
         )
 
     token = _create_token(body.username)
@@ -370,8 +380,9 @@ def create_admin(body: CreateAdminRequest, current_admin: dict = Depends(get_cur
     with get_db_context() as conn:
         try:
             conn.execute(
-                "INSERT INTO admins (username, password_hash, role, permissions, email) VALUES (?, ?, ?, ?, ?)",
-                (body.username, _hash_password(body.password), role, json.dumps(permissions), email),
+                # New admins inherit the creator's tenant so companies stay isolated.
+                "INSERT INTO admins (username, password_hash, role, permissions, email, tenant_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (body.username, _hash_password(body.password), role, json.dumps(permissions), email, current_admin.get("tenant_id")),
             )
         except Exception:
             raise HTTPException(status_code=409, detail="Username already taken")
@@ -384,7 +395,12 @@ def create_admin(body: CreateAdminRequest, current_admin: dict = Depends(get_cur
 def list_admins(current_admin: dict = Depends(require_permission("manage_admins"))):
     """List all admin accounts with their roles and permissions."""
     result = []
-    for a in list_admin_records():
+    # Scope to the current admin's tenant; super_admins of the default tenant
+    # (the platform owner) still see all admins for cross-tenant management.
+    tenant_id = current_admin.get("tenant_id")
+    from database import get_default_tenant_id
+    see_all = current_admin.get("role") == "super_admin" and tenant_id == get_default_tenant_id()
+    for a in list_admin_records(None if see_all else tenant_id):
         result.append({
             "username": a["username"],
             "email": a.get("email"),
@@ -504,6 +520,8 @@ def admin_me(current_admin: dict = Depends(get_current_admin)):
         "username": current_admin["username"],
         "role": current_admin["role"],
         "permissions": current_admin["permissions"],
+        # tenant_id lets the frontend scope all queries to the admin's company
+        "tenant_id": current_admin.get("tenant_id"),
     }
 
 

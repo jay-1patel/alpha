@@ -40,6 +40,46 @@ def _loads_json(value, default=None):
         return default if default is not None else {}
 
 
+# ── Multi-tenancy: default tenant helpers ───────────────────────────────────
+# Every row created before multi-tenancy belongs to this implicit tenant.
+# get_default_tenant_id() creates it lazily so existing DBs keep working.
+DEFAULT_TENANT_SLUG = "default"
+
+
+def get_default_tenant_id() -> int:
+    """Return the id of the default tenant, creating it on first use.
+
+    Keeps single-tenant deployments (the legacy behaviour) fully working:
+    rows without an explicit tenant_id are treated as belonging to this
+    tenant.
+    """
+    with get_db_context() as conn:
+        row = conn.execute(
+            "SELECT id FROM tenants WHERE slug = ?", (DEFAULT_TENANT_SLUG,)
+        ).fetchone()
+        if row:
+            return row["id"]
+        conn.execute(
+            """INSERT INTO tenants (name, slug, is_active, created_at)
+               VALUES (?, ?, 1, CURRENT_TIMESTAMP)""",
+            ("Default Tenant", DEFAULT_TENANT_SLUG),
+        )
+        return conn.execute(
+            "SELECT id FROM tenants WHERE slug = ?", (DEFAULT_TENANT_SLUG,)
+        ).fetchone()["id"]
+
+
+def get_tenant_id_for_admin(username: str) -> int:
+    """Resolve the tenant an admin belongs to (falls back to default)."""
+    with get_db_context() as conn:
+        row = conn.execute(
+            "SELECT tenant_id FROM admins WHERE username = ?", (username,)
+        ).fetchone()
+    if row and row["tenant_id"]:
+        return row["tenant_id"]
+    return get_default_tenant_id()
+
+
 # ── Connection helpers ───────────────────────────────────────────────────
 
 def get_db():
@@ -65,6 +105,19 @@ def init_db():
     with get_db_context() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
+        # ── Multi-tenancy: every company gets a row here ──────────────────
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS tenants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                slug TEXT UNIQUE NOT NULL,
+                whatsapp_number TEXT,
+                whatsapp_credentials_json TEXT DEFAULT '{}',
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
 
         conn.execute(
             """CREATE TABLE IF NOT EXISTS chat_history (
@@ -234,6 +287,7 @@ def init_db():
                 role TEXT DEFAULT 'sub_admin',
                 permissions TEXT DEFAULT '{}',
                 recovery_key TEXT,
+                tenant_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )"""
@@ -439,6 +493,7 @@ def init_db():
             ("permissions", "TEXT DEFAULT '{}'"),
             ("recovery_key", "TEXT"),
             ("salt", "TEXT"),
+            ("tenant_id", "INTEGER"),
             ("role", "TEXT DEFAULT 'sub_admin'"),
             ("email", "TEXT"),
             ("updated_at", "TIMESTAMP"),
@@ -666,6 +721,16 @@ def init_db():
         )
         # Products: optional stock tracking (NULL = untracked).
         _ensure_columns(conn, "products", [("stock_quantity", "INTEGER")])
+        # ── Multi-tenancy Phase 1: tenant_id on all core tables ─────────────
+        # Must run AFTER the CREATE TABLE statements above. NULL = default
+        # tenant (legacy rows); get_default_tenant_id() resolves NULLs.
+        TENANT_TABLES = [
+            "products", "faq_dataset", "knowledge_base", "user_states",
+            "user_sessions", "orders", "complaints", "campaigns",
+            "distributors", "menus", "whatsapp_templates",
+        ]
+        for table in TENANT_TABLES:
+            _ensure_columns(conn, table, [("tenant_id", "INTEGER")])
 
 
 # ── Generic publish/draft config helpers ──────────────────────────────────
@@ -1760,9 +1825,17 @@ def get_admin_record(username: str) -> dict:
     return d
 
 
-def list_admin_records() -> list:
+def list_admin_records(tenant_id: int = None) -> list:
+    # tenant_id filters the listing so one company never sees another's admins.
+    # None keeps the legacy behaviour (all admins), used by super-admin tools.
     with get_db_context() as conn:
-        rows = conn.execute("SELECT * FROM admins ORDER BY created_at ASC").fetchall()
+        if tenant_id is not None:
+            rows = conn.execute(
+                "SELECT * FROM admins WHERE tenant_id = ? ORDER BY created_at ASC",
+                (tenant_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM admins ORDER BY created_at ASC").fetchall()
     result = []
     for r in rows:
         d = dict(r)
