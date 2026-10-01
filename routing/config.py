@@ -72,10 +72,10 @@ IMAGE_BASE_URL = os.getenv("IMAGE_BASE_URL")
 # ── Auth / admin ──────────────────────────────────────────────────────────
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY")
 ADMIN_JWT_SECRET = os.getenv("ADMIN_JWT_SECRET")
-ADMIN_JWT_EXPIRY_HOURS = int(os.getenv("ADMIN_JWT_EXPIRY_HOURS"))
-ADMIN_TOKEN_TTL_HOURS = int(os.getenv("ADMIN_TOKEN_TTL_HOURS"))
+ADMIN_JWT_EXPIRY_HOURS = int(os.getenv("ADMIN_JWT_EXPIRY_HOURS", "24"))
+ADMIN_TOKEN_TTL_HOURS = int(os.getenv("ADMIN_TOKEN_TTL_HOURS", "24"))
 ADMIN_RECOVERY_KEY = os.getenv("ADMIN_RECOVERY_KEY")
-OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES"))
+OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
 
 # ── Storage / uploads ─────────────────────────────────────────────────────
 UPLOAD_DIR = str(BACKEND_DIR / "uploaded_files")
