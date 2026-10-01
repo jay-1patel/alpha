@@ -30,6 +30,7 @@ import {
   useCreateCampaign,
 } from '@/lib/hooks/useCampaigns'
 import { useCampaignDocuments } from '@/lib/hooks/useFiles'
+import { useBranding } from '@/lib/hooks/useBranding'
 
 /* ------------------------------------------------------------------ */
 /* CONSTANTS                                                          */
@@ -162,24 +163,28 @@ function WhatsAppPreview({
   buttons,
   listItems,
   mediaName,
+  branding,
 }: {
   templateType: TemplateType
   message: string
   buttons: { label: string; value: string }[]
   listItems: { title: string; description?: string }[]
   mediaName?: string | null
+  branding?: { company_name: string; logo_url?: string }
 }) {
+  const companyName = branding?.company_name || 'Business'
+  const initial = companyName.charAt(0).toUpperCase()
   return (
     <div className="mx-auto w-full max-w-[300px] overflow-hidden rounded-[2rem] border-[6px] border-slate-800 bg-[#e5ddd5] shadow-xl">
       {/* WHATSAPP HEADER */}
       <div className="flex items-center gap-2 bg-[#075e54] px-4 py-2.5">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-xs font-bold text-[#075e54]">
-          T
+          {initial}
         </span>
 
         <div>
           <p className="text-xs font-semibold text-white">
-            TrooGood
+            {companyName}
           </p>
 
           <p className="text-[10px] text-emerald-100">
@@ -273,6 +278,7 @@ export function CampaignBuilder({
   onClose,
   initial,
 }: CampaignBuilderProps) {
+  const { data: branding } = useBranding()
   const [step, setStep] = useState(0)
 
   /* STEP 1 — AUDIENCE */
@@ -819,7 +825,7 @@ export function CampaignBuilder({
                         id="camp-media"
                         value={mediaName}
                         onChange={(e) => setMediaName(e.target.value)}
-                        placeholder="troogood-catalog-2026.pdf"
+                        placeholder="catalog-2026.pdf"
                         className="mt-1.5"
                       />
                     )}

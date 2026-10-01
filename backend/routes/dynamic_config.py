@@ -43,6 +43,17 @@ VALID_SCOPES = {
     "campaigns",
     "faq",
     "admin_settings",
+    "branding",
+}
+
+# Default branding snapshot. Used when nothing has been published yet so the
+# panel and bot never depend on a hardcoded company name.
+DEFAULT_BRANDING = {
+    "company_name": "Admin",
+    "bot_name": "WhatsApp Bot",
+    "logo_url": "",
+    "about_text": "",
+    "tagline": "WhatsApp Bot Management",
 }
 
 
@@ -154,3 +165,24 @@ def history(
     """Return recent publish events for a scope."""
     _validate_scope(scope)
     return {"scope": scope, "history": get_publish_history(scope, limit=limit)}
+
+
+# ── Public branding (login page needs it before auth) ─────────────────────
+# NOTE: A separate router is used because the main router requires the
+# manage_operations permission on every endpoint; branding must be readable
+# unauthenticated so the login screen can render the tenant's logo/name.
+from fastapi import APIRouter as _APIRouter  # noqa: E402
+
+public_router = APIRouter(prefix="/api/branding", tags=["branding"])
+
+
+@public_router.get("")
+def get_public_branding():
+    """Return the published branding snapshot, merged over defaults.
+
+    Public endpoint: the login/forgot-password pages need the company name
+    and logo before an admin token exists.
+    """
+    published = get_published_config("branding", default=None) or {}
+    merged = {**DEFAULT_BRANDING, **(published or {})}
+    return merged

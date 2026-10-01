@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Loader2, ArrowLeft, MailCheck, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { useBranding } from '@/lib/hooks/useBranding'
 
 const CHIKKI_STYLES = `
   /* ---------- Staggered entrance ---------- */
@@ -85,6 +86,7 @@ const CHIKKI_STYLES = `
 `
 
 export default function ForgotPasswordPage() {
+  const { data: branding } = useBranding()
   const [username, setUsername] = useState('')
   const [loading, setLoading] = useState(false)
   const [sent, setSent] = useState(false)
@@ -118,11 +120,13 @@ export default function ForgotPasswordPage() {
 
         <div className="w-full max-w-md space-y-6">
           <div className="text-center space-y-3">
-            <img
-              src="/troogood_logo.png"
-              alt="TrooGood"
-              className="mx-auto h-30 w-60 object-contain drop-shadow-lg"
-            />
+            {branding?.logo_url ? (
+              <img
+                src={branding.logo_url}
+                alt={branding.company_name}
+                className="mx-auto h-30 w-60 object-contain drop-shadow-lg"
+              />
+            ) : null}
             <h1 className="text-3xl font-semibold tracking-tight">Check your email</h1>
           </div>
 
@@ -226,11 +230,13 @@ export default function ForgotPasswordPage() {
 
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-3">
-          <img
-            src="/troogood_logo.png"
-            alt="TrooGood"
-            className="mx-auto h-30 w-60 object-contain drop-shadow-lg"
-          />
+          {branding?.logo_url ? (
+            <img
+              src={branding.logo_url}
+              alt={branding.company_name}
+              className="mx-auto h-30 w-60 object-contain drop-shadow-lg"
+            />
+          ) : null}
           <h1 className="text-3xl font-semibold tracking-tight">Forgot Password?</h1>
           <p className="text-lg text-muted-foreground">We will email you a reset code</p>
         </div>

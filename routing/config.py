@@ -58,7 +58,9 @@ WEBSITE_CRAWL_MAX_PAGES = int(os.getenv("WEBSITE_CRAWL_MAX_PAGES", "150"))
 WEBSITE_CRAWL_DELAY = float(os.getenv("WEBSITE_CRAWL_DELAY", "0.5"))
 
 # ── Bot messaging defaults ────────────────────────────────────────────────
-BUSINESS_NAME = os.getenv("BRAND_NAME")
+# Branding is env-driven here (bootstrap-time); the DB-backed branding
+# config (published_config scope "branding") overrides it at runtime.
+BUSINESS_NAME = os.getenv("BRAND_NAME") or "Business"
 BOT_NAME = os.getenv("BOT_NAME", BUSINESS_NAME)
 WELCOME_MESSAGE = os.getenv("WELCOME_MESSAGE", f"Welcome to {BUSINESS_NAME}! How can I help you today?")
 MENU_HEADER = os.getenv("MENU_HEADER", BUSINESS_NAME)
@@ -107,7 +109,7 @@ CATALOGUE_BUTTON_TITLE = os.getenv("CATALOGUE_BUTTON_TITLE", "New Arrivals")
 CATALOGUE_BODY_TEXT = os.getenv("CATALOGUE_BODY_TEXT", "Choose an option:")
 
 # ── Tunnel / public URL ───────────────────────────────────────────────────
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL").rstrip("/")
+PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "http://localhost:9000").rstrip("/")
 HKDEK_WEBHOOK_URL = os.getenv("HKDEK_WEBHOOK_URL")
 
 # ── Logging ───────────────────────────────────────────────────────────────

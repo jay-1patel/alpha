@@ -9,6 +9,7 @@ import { KeyRound, Loader2, Eye, EyeOff, Lock, ShieldCheck, CheckCircle2, Circle
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
+import { useBranding } from '@/lib/hooks/useBranding'
 
 function PasswordRule({ met, label }: { met: boolean; label: string }) {
   return (
@@ -20,6 +21,7 @@ function PasswordRule({ met, label }: { met: boolean; label: string }) {
 }
 
 export default function ChangePasswordPage() {
+  const { data: branding } = useBranding()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -78,11 +80,13 @@ export default function ChangePasswordPage() {
       <div className="w-full max-w-md space-y-6">
         {/* Header */}
         <div className="text-center space-y-3">
-          <img
-            src="/troogood_logo.png"
-            alt="TrooGood"
-            className="mx-auto h-34 w-24 object-contain"
-          />
+          {branding?.logo_url ? (
+            <img
+              src={branding.logo_url}
+              alt={branding.company_name}
+              className="mx-auto h-34 w-24 object-contain"
+            />
+          ) : null}
           <h1 className="text-2xl font-semibold tracking-tight">Change Password</h1>
           <p className="text-base text-muted-foreground">
             Choose a strong password you don't use anywhere else

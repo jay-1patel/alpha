@@ -29,6 +29,7 @@ import {
   BarChart3,
   Bot,
   ListTree,
+  Palette,
 } from 'lucide-react'
 
 import {
@@ -44,6 +45,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 
 import { toast, Toaster } from 'sonner'
 
+import { useBranding } from '@/lib/hooks/useBranding'
 import {
   getToken,
   clearToken,
@@ -66,6 +68,7 @@ const DistributorsTab = lazy(() => import('@/components/distributors/distributor
 const AnalyticsTab = lazy(() => import('@/components/analytics/analytics-tab'))
 const WhatsAppTester = lazy(() => import('@/components/tester/whatsapp-tester'))
 const MenuManagerTab = lazy(() => import('@/components/menu-manager/menu-manager-tab'))
+const BrandingTab = lazy(() => import('@/components/branding/branding-tab'))
 
 const LoginPage = lazy(() => import('@/components/auth/login'))
 const ForgotPasswordPage = lazy(() => import('@/components/auth/forgot-password'))
@@ -86,6 +89,7 @@ type TabType =
   | 'analytics'
   | 'tester'
   | 'menu-manager'
+  | 'branding'
   | 'change-password'
   | 'manage-admins'
 
@@ -222,6 +226,12 @@ const navItems: {
     permission: 'view_files',
   },
   {
+    id: 'branding',
+    label: 'Branding',
+    icon: Palette,
+    permission: 'manage_operations',
+  },
+  {
     id: 'manage-admins',
     label: 'Manage Admins',
     icon: Users,
@@ -241,6 +251,7 @@ const TAB_IDS: TabType[] = [
   'analytics',
   'tester',
   'menu-manager',
+  'branding',
   'manage-admins',
   'change-password',
 ]
@@ -317,6 +328,8 @@ function canAccessTab(
 
     case 'menu-manager':
       return permissions.view_files === true
+    case 'branding':
+      return permissions.manage_operations === true
 
     case 'manage-admins':
       return permissions.manage_admins === true
@@ -371,6 +384,7 @@ const queryClient = new QueryClient({
 /* -------------------------------------------------------------------------- */
 
 export default function App() {
+  const { data: branding } = useBranding()
   const [activeTab, setActiveTab] =
     useState<TabType>('dashboard')
 
@@ -780,6 +794,8 @@ export default function App() {
 
       case 'menu-manager':
         return <MenuManagerTab />
+      case 'branding':
+        return <BrandingTab />
 
       case 'products':
         return (
@@ -905,15 +921,17 @@ export default function App() {
                 <X className="h-4 w-4" />
               </Button>
 
+              {branding?.logo_url ? (
               <img
-                src="/troogood_logo.png"
-                alt="TrooGood"
+                src={branding.logo_url}
+                alt={branding.company_name}
                 className="
                   h-34 w-24
                   rounded-xl
                   object-contain
                 "
               />
+              ) : null}
 
               <div className="text-center">
 
