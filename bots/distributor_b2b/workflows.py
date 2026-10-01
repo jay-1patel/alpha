@@ -181,11 +181,17 @@ async def _handle_main_selection(wa_id: str, message: str, context: dict, cfg, t
         return {"new_state": cfg.B2B_MAIN_MENU_STATE}
 
     if sel == "menu_about" or sel in ("company policies", "about"):
-        await send_text_message(
-            wa_id,
-            "We are a premium chikkis, dry fruits & snacks manufacturer. "
-            "You can review our company policies with your sales representative.",
-        )
+        # Branding (about_text) comes from the published dynamic config so
+        # the copy is tenant-editable instead of hardcoded per company.
+        from database import get_published_config
+
+        branding = get_published_config("branding", default=None) or {}
+        about_text = (branding.get("about_text") or "").strip()
+        if not about_text:
+            about_text = (
+                "You can review our company policies with your sales representative."
+            )
+        await send_text_message(wa_id, about_text)
         return {"new_state": cfg.B2B_MAIN_MENU_STATE}
 
     if sel == "menu_gst" or sel == "gst info" or sel == "gst":

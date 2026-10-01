@@ -5,6 +5,7 @@ import { format } from 'date-fns'
 import axios from 'axios'
 import { Send, Mic, Paperclip, Smile, Search, ArrowLeft, RefreshCw } from 'lucide-react'
 import { API_BASE } from '@/lib/config'
+import { useBranding } from '@/lib/hooks/useBranding'
 
 /* -------------------------------------------------------------------------- */
 /* TYPES                                                                      */
@@ -68,7 +69,7 @@ const WA_ID = 'test-user-001'
 /* HELPERS                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const botName = 'TrooGood Bot'
+
 
 function makeId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
@@ -99,6 +100,8 @@ function Ticks({ read, own }: { read: boolean; own: boolean }) {
 /* -------------------------------------------------------------------------- */
 
 export default function WhatsAppTester() {
+  const { data: branding } = useBranding()
+  const botName = branding?.bot_name || 'WhatsApp Bot'
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputText, setInputText] = useState('')
   const [sending, setSending] = useState(false)

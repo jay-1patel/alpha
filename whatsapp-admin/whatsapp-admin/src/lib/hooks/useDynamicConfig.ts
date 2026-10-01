@@ -11,6 +11,7 @@ export type DynamicScope =
   | 'campaigns'
   | 'faq'
   | 'admin_settings'
+  | 'branding'
 
 const DYNAMIC_CONFIG_KEY = ['dynamic-config']
 

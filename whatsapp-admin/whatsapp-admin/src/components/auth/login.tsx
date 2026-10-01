@@ -9,8 +9,10 @@ import { Loader2, Eye, EyeOff, Lock, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { api, setToken } from '@/lib/api'
+import { useBranding } from '@/lib/hooks/useBranding'
 
 export default function LoginPage() {
+  const { data: branding } = useBranding()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -118,13 +120,15 @@ export default function LoginPage() {
 
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-3">
-          <img
-            src="/troogood_logo.png"
-            alt="TrooGood"
-            className="mx-auto h-30 w-60 object-contain drop-shadow-lg"
-          />
-          <h1 className="text-3xl font-semibold tracking-tight">Admin Panel</h1>
-          <p className="text-lg text-muted-foreground">WhatsApp Bot Management</p>
+          {branding?.logo_url ? (
+            <img
+              src={branding.logo_url}
+              alt={branding.company_name}
+              className="mx-auto h-30 w-60 object-contain drop-shadow-lg"
+            />
+          ) : null}
+          <h1 className="text-3xl font-semibold tracking-tight">{branding?.company_name} Admin</h1>
+          <p className="text-lg text-muted-foreground">{branding?.tagline}</p>
         </div>
 
         <div className="group relative">
