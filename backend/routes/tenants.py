@@ -87,8 +87,9 @@ def list_tenants(
     status: Optional[str] = None,
     current_admin: dict = Depends(require_permission("manage_operations")),
 ):
+    role = (current_admin.get("role") or "").lower()
     tenant_id_filter = None
-    if current_admin.get("role") != "super_admin":
+    if role != "super_admin":
         tid = current_admin.get("tenant_id")
         if tid:
             tenant_id_filter = str(tid)

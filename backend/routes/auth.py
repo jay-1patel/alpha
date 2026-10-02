@@ -111,7 +111,9 @@ def _parse_permissions(raw, default_all: bool = False) -> dict:
 def _effective_permissions(role: str, raw) -> dict:
     """Super admins and admins always get everything; sub admins get exactly what is stored."""
     role_lower = (role or "").lower()
-    if role_lower in ("super_admin", "admin"):
+    if role_lower == "super_admin":
+        return dict(SUPER_ADMIN_PERMISSIONS)
+    if role_lower == "admin":
         return dict(SUPER_ADMIN_PERMISSIONS)
     return _parse_permissions(raw)
 
@@ -120,7 +122,9 @@ def has_permission(admin: dict, perm: str) -> bool:
     if not admin:
         return False
     role_lower = (admin.get("role") or "").lower()
-    if role_lower in ("super_admin", "admin"):
+    if role_lower == "super_admin":
+        return True
+    if role_lower == "admin":
         return True
     return bool(admin.get("permissions", {}).get(perm))
 
@@ -306,8 +310,9 @@ def require_tenant_access():
     admin = get_current_admin(request, credentials)
     admin_role = (admin.get("role") or "").lower()
     admin_tenant = admin.get("tenant_id")
-    if admin_role not in ("super_admin", "admin") and admin_tenant and str(admin_tenant) != str(target):
-        raise HTTPException(status_code=403, detail="You do not have access to this tenant")
+    if admin_role != "super_admin":
+        if admin_tenant and str(admin_tenant) != str(target):
+            raise HTTPException(status_code=403, detail="You do not have access to this tenant")
     if not has_permission(admin, "manage_operations"):
         raise HTTPException(
             status_code=403, detail="You do not have permission to manage tenant profiles"
