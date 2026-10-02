@@ -1,0 +1,842 @@
+import { useMemo, useState } from 'react'
+import {
+  ArrowLeft,
+  ArrowRight,
+  BadgeCheck,
+  Building2,
+  CalendarClock,
+  Check,
+  MessageSquareText,
+  Rocket,
+  ShieldAlert,
+  Sparkles,
+  Webhook,
+} from 'lucide-react'
+import { applyVertical, draftToSnapshot, emptyDraft, slugify, type WizardDraft } from '@/lib/profile'
+import { useAction } from '@/lib/hooks'
+import { tenantsApi, useTenants } from '@/lib/tenants'
+import { navigate } from '@/lib/router'
+import { FEATURE_GROUPS, FEATURE_LABELS, VERTICAL_CATALOG, getVertical } from '@/lib/verticals'
+import type { FeatureFlag } from '@/lib/types'
+import { Button } from '@/components/ui/button'
+import { Card, CardBody, CardHeader, SectionTitle } from '@/components/ui/card'
+import { Input, Textarea } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { TagInput } from '@/components/ui/tags'
+import { Alert } from '@/components/ui/feedback'
+import { VerticalGlyph } from '@/components/vertical-icon'
+import { PageHeader } from '@/components/layout/page-header'
+import { useToast } from '@/components/ui/toast'
+
+const DAYS = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
+]
+
+const STEPS = [
+  { id: 'company', label: 'Company' },
+  { id: 'whatsapp', label: 'WhatsApp' },
+  { id: 'brand', label: 'Brand & voice' },
+  { id: 'capabilities', label: 'Capabilities' },
+  { id: 'domain', label: 'Your business' },
+  { id: 'notifications', label: 'Notifications' },
+  { id: 'guardrails', label: 'Guardrails' },
+  { id: 'review', label: 'Review' },
+] as const
+
+export function RegisterWizard() {
+  const [step, setStep] = useState(0)
+  const [draft, setDraft] = useState<WizardDraft>(emptyDraft)
+  const { reload, tenants } = useTenants()
+  const action = useAction()
+  const toast = useToast()
+
+  const patch = (values: Partial<WizardDraft>) => setDraft((d) => ({ ...d, ...values }))
+
+  const tenantIdTaken = tenants.some((t) => t.id === draft.tenantId.trim())
+
+  const error = useMemo(() => validationError(step, draft, tenantIdTaken), [step, draft, tenantIdTaken])
+
+  const submit = async () => {
+    const created = await action.run(() =>
+      tenantsApi.create({
+        tenant_id: draft.tenantId.trim(),
+        slug: draft.tenantId.trim(),
+        vertical: draft.vertical,
+        display_name: draft.displayName || draft.companyName,
+        waba_phone_id: draft.wabaPhoneId.trim(),
+        status: 'active',
+      }),
+    )
+    if (!created) return
+
+    const id = created.tenant.id
+    const saved = await action.run(() => tenantsApi.saveDraft(id, draftToSnapshot(draft)))
+    if (!saved) return
+
+    const published = await action.run(() => tenantsApi.publish(id))
+    if (!published) {
+      toast.push('Draft saved but publishing failed — open the tenant and fix the profile.', 'error')
+      reload()
+      navigate(`/tenants/${encodeURIComponent(id)}/profile`)
+      return
+    }
+
+    toast.push(`${draft.companyName} is live on version ${published.version}`)
+    reload()
+    navigate(`/tenants/${encodeURIComponent(id)}/overview`)
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <PageHeader
+        title="Register a tenant"
+        description="Answer these and the console builds the tenant's profile: its menu, intents, flows, vocabulary and guardrails. Nothing here is hardcoded afterwards — publish a new version any time."
+      />
+
+      <ol className="mb-7 flex flex-wrap gap-1.5">
+        {STEPS.map((s, index) => {
+          const state = index === step ? 'current' : index < step ? 'done' : 'todo'
+          return (
+            <li key={s.id} className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => index < step && setStep(index)}
+                disabled={index > step}
+                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition ${
+                  state === 'current'
+                    ? 'bg-accent-100 text-accent-800 ring-1 ring-inset ring-accent-300'
+                    : state === 'done'
+                      ? 'text-emerald-700 hover:text-emerald-700'
+                      : 'text-slate-600'
+                }`}
+              >
+                {state === 'done' ? <Check className="h-3 w-3" /> : <span>{index + 1}</span>}
+                {s.label}
+              </button>
+              {index < STEPS.length - 1 && <span className="text-slate-600">/</span>}
+            </li>
+          )
+        })}
+      </ol>
+
+      <Card>
+        {step === 0 && <CompanyStep draft={draft} patch={patch} />}
+        {step === 1 && <WhatsAppStep draft={draft} patch={patch} />}
+        {step === 2 && <BrandStep draft={draft} patch={patch} />}
+        {step === 3 && <CapabilitiesStep draft={draft} patch={patch} />}
+        {step === 4 && <DomainStep draft={draft} patch={patch} />}
+        {step === 5 && <NotificationsStep draft={draft} patch={patch} />}
+        {step === 6 && <GuardrailsStep draft={draft} patch={patch} />}
+        {step === 7 && <ReviewStep draft={draft} onEdit={setStep} />}
+
+        {action.error && (
+          <div className="px-5 pb-4">
+            <Alert tone="danger" title="Registration failed">
+              {action.error}
+            </Alert>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between border-t border-surface-line px-5 py-4">
+          <Button
+            variant="ghost"
+            disabled={step === 0}
+            onClick={() => setStep((s) => Math.max(0, s - 1))}
+            icon={<ArrowLeft className="h-4 w-4" />}
+          >
+            Back
+          </Button>
+
+          {step < STEPS.length - 1 ? (
+            <Button
+              variant="primary"
+              disabled={Boolean(error)}
+              onClick={() => setStep((s) => s + 1)}
+            >
+              Continue
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              loading={action.busy}
+              onClick={submit}
+              icon={<Rocket className="h-4 w-4" />}
+            >
+              Create and publish
+            </Button>
+          )}
+        </div>
+      </Card>
+
+      {error && step < STEPS.length - 1 && (
+        <p className="mt-3 text-xs text-amber-700/80">{error}</p>
+      )}
+      {tenantIdTaken && step === 0 && (
+        <Alert tone="warning" className="mt-4">
+          A tenant with this id already exists. Pick another id, or cancel and edit the existing tenant instead.
+        </Alert>
+      )}
+    </div>
+  )
+}
+
+// ── steps ──────────────────────────────────────────────────────────────────
+
+function StepShell({
+  title,
+  description,
+  icon,
+  children,
+}: {
+  title: string
+  description: string
+  icon: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <>
+      <CardHeader title={title} description={description} icon={icon} />
+      <CardBody className="space-y-5">{children}</CardBody>
+    </>
+  )
+}
+
+function CompanyStep({ draft, patch }: StepProps) {
+  return (
+    <StepShell
+      title="Who is this tenant?"
+      description="The company and the business field decide everything that follows: which questions you are asked, which features are offered, and the words the bot uses."
+      icon={<Building2 className="h-4 w-4" />}
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input
+          label="Company name"
+          value={draft.companyName}
+          onChange={(e) => patch({ companyName: e.target.value, tenantId: draft.tenantId || slugify(e.target.value) })}
+          placeholder="Leeway Softech"
+          required
+        />
+        <Input
+          label="Tenant id"
+          value={draft.tenantId}
+          onChange={(e) => patch({ tenantId: slugify(e.target.value) })}
+          hint="Lowercase, no spaces. This is the id used in the API and the database."
+          required
+        />
+        <Input
+          label="Display name"
+          value={draft.displayName}
+          onChange={(e) => patch({ displayName: e.target.value })}
+          placeholder={draft.companyName || 'Shown in menus'}
+        />
+        <Input
+          label="Website"
+          value={draft.website}
+          onChange={(e) => patch({ website: e.target.value })}
+          placeholder="https://example.com"
+        />
+      </div>
+
+      <div>
+        <SectionTitle hint="This is the single most important answer: it selects the profile defaults, the vocabulary, the menu and the intents.">
+          Business field
+        </SectionTitle>
+        <div className="grid gap-2.5 sm:grid-cols-2">
+          {VERTICAL_CATALOG.map((v) => {
+            const active = draft.vertical === v.id
+            return (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => patch(applyVertical(draft, v.id))}
+                className={`flex gap-3 rounded-lg p-3.5 text-left ring-1 ring-inset transition ${
+                  active
+                    ? 'bg-accent-100 ring-accent-400'
+                    : 'bg-surface-panel ring-surface-line hover:bg-accent-50'
+                }`}
+              >
+                <VerticalGlyph
+                  name={v.icon}
+                  className={`mt-0.5 h-5 w-5 shrink-0 ${active ? 'text-accent-700' : 'text-slate-500'}`}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-slate-100">{v.label}</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-slate-400">{v.blurb}</span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </StepShell>
+  )
+}
+
+function WhatsAppStep({ draft, patch }: StepProps) {
+  const toggleDay = (day: number) =>
+    patch({
+      openDays: draft.openDays.includes(day)
+        ? draft.openDays.filter((d) => d !== day)
+        : [...draft.openDays, day].sort(),
+    })
+
+  return (
+    <StepShell
+      title="WhatsApp and working hours"
+      description="The phone number routes inbound messages to this tenant. Working hours decide when the bot offers a callback instead of a live handoff."
+      icon={<CalendarClock className="h-4 w-4" />}
+    >
+      <Input
+        label="WhatsApp phone number id"
+        value={draft.wabaPhoneId}
+        onChange={(e) => patch({ wabaPhoneId: e.target.value })}
+        placeholder="100012345678901"
+        hint="From the Meta Business account (WABA). Leave blank and bind it later — each number can only belong to one tenant."
+      />
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Input
+          label="Timezone"
+          value={draft.timezone}
+          onChange={(e) => patch({ timezone: e.target.value })}
+          placeholder="Asia/Kolkata"
+        />
+        <Input
+          label="Opens"
+          type="time"
+          value={draft.openTime}
+          onChange={(e) => patch({ openTime: e.target.value })}
+          disabled={draft.alwaysOpen}
+        />
+        <Input
+          label="Closes"
+          type="time"
+          value={draft.closeTime}
+          onChange={(e) => patch({ closeTime: e.target.value })}
+          disabled={draft.alwaysOpen}
+        />
+      </div>
+
+      <Switch
+        checked={draft.alwaysOpen}
+        onChange={(alwaysOpen) => patch({ alwaysOpen })}
+        label="Always open"
+        description="When off, out-of-hours conversations get a callback flow instead of a handoff."
+      />
+
+      {!draft.alwaysOpen && (
+        <div className="space-y-3">
+          <div>
+            <p className="field-label">Open on</p>
+            <div className="flex flex-wrap gap-1.5">
+              {DAYS.map((day) => {
+                const on = draft.openDays.includes(day.value)
+                return (
+                  <button
+                    key={day.value}
+                    type="button"
+                    onClick={() => toggleDay(day.value)}
+                    className={`h-9 w-12 rounded-lg text-xs font-medium ring-1 ring-inset transition ${
+                      on
+                        ? 'bg-accent-600 text-white ring-accent-500'
+                        : 'bg-surface-raised text-slate-400 ring-surface-line hover:text-slate-100'
+                    }`}
+                  >
+                    {day.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <Textarea
+            label="Out-of-hours message"
+            value={draft.outOfHoursMessage}
+            onChange={(e) => patch({ outOfHoursMessage: e.target.value })}
+          />
+        </div>
+      )}
+    </StepShell>
+  )
+}
+
+function BrandStep({ draft, patch }: StepProps) {
+  const v = getVertical(draft.vertical)
+  return (
+    <StepShell
+      title="Brand and voice"
+      description="How the bot introduces itself and how it talks. These strings are used verbatim in menus and prompts."
+      icon={<MessageSquareText className="h-4 w-4" />}
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input
+          label="Bot name"
+          value={draft.botName}
+          onChange={(e) => patch({ botName: e.target.value })}
+          placeholder="Asha"
+        />
+        <Select
+          label="Tone"
+          value={draft.tone}
+          onChange={(e) => patch({ tone: e.target.value })}
+          hint={`${v.short} default: ${v.tone}`}
+        >
+          <option value="friendly and helpful">Friendly and helpful</option>
+          <option value="professional and confident">Professional and confident</option>
+          <option value="formal and compliant">Formal and compliant</option>
+          <option value="warm and helpful">Warm and helpful</option>
+          <option value="calm and empathetic">Calm and empathetic</option>
+          <option value="concise and direct">Concise and direct</option>
+        </Select>
+        <Input
+          label="Tagline"
+          value={draft.tagline}
+          onChange={(e) => patch({ tagline: e.target.value })}
+          placeholder="Software that ships"
+        />
+        <Input
+          label="Closing signature"
+          value={draft.signature}
+          onChange={(e) => patch({ signature: e.target.value })}
+          placeholder="— Team Leeway"
+        />
+        <Input
+          label="Support email"
+          type="email"
+          value={draft.supportEmail}
+          onChange={(e) => patch({ supportEmail: e.target.value })}
+          placeholder="support@example.com"
+        />
+        <Input
+          label="Support phone"
+          value={draft.supportPhone}
+          onChange={(e) => patch({ supportPhone: e.target.value })}
+          placeholder="+91 98765 43210"
+        />
+      </div>
+
+      <Textarea
+        label="Menu greeting"
+        value={draft.greeting}
+        onChange={(e) => patch({ greeting: e.target.value })}
+        placeholder={`Hi! I'm ${draft.botName || 'the assistant'} from ${draft.companyName || 'our team'}. How can I help?`}
+        hint="Shown as the WhatsApp menu body. Leave blank to use the field default."
+      />
+
+      <Alert tone="info" title={`Vocabulary for ${v.short}`}>
+        The bot will call your offerings <strong>{v.nouns.item}</strong> and your enquiries{' '}
+        <strong>{v.nouns.lead}</strong>. You can override every one of these later in the profile editor.
+      </Alert>
+    </StepShell>
+  )
+}
+
+function CapabilitiesStep({ draft, patch }: StepProps) {
+  const v = getVertical(draft.vertical)
+  const on = new Set(draft.features)
+  const toggle = (flag: FeatureFlag, next: boolean) =>
+    patch({
+      features: next ? [...draft.features, flag] : draft.features.filter((f) => f !== flag),
+    })
+
+  return (
+    <StepShell
+      title="What should the bot be able to do?"
+      description={`Pre-selected for ${v.short}. Switch off anything you do not want — menus, intents and services all follow these flags.`}
+      icon={<Sparkles className="h-4 w-4" />}
+    >
+      <div className="rounded-lg bg-accent-50 p-4 ring-1 ring-inset ring-accent-200">
+        <p className="text-xs font-medium text-accent-700">With these capabilities your bot will:</p>
+        <ul className="mt-2 space-y-1.5">
+          {v.capabilities.map((line) => (
+            <li key={line} className="flex gap-2 text-xs leading-relaxed text-slate-300">
+              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+              {line}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="space-y-5">
+        {FEATURE_GROUPS.filter((g) => !v.hiddenGroups.includes(g.id)).map((group) => (
+          <div key={group.id}>
+            <SectionTitle hint={group.description}>{group.label}</SectionTitle>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {group.flags.map((flag) => {
+                const meta = FEATURE_LABELS[flag]
+                return (
+                  <div key={flag} className="rounded-lg bg-surface-panel p-3 ring-1 ring-inset ring-surface-line">
+                    <Switch
+                      checked={on.has(flag)}
+                      onChange={(next) => toggle(flag, next)}
+                      label={meta.label}
+                      description={meta.help}
+                      size="sm"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </StepShell>
+  )
+}
+
+function DomainStep({ draft, patch }: StepProps) {
+  const v = getVertical(draft.vertical)
+  const missingRequired = v.questions.filter((q) => q.required && !answerValue(draft, q.key))
+
+  return (
+    <StepShell
+      title={`About your ${v.short.toLowerCase()} business`}
+      description="These answers become the words the bot recognises. The more specific you are, the fewer questions it gets wrong."
+      icon={<Sparkles className="h-4 w-4" />}
+    >
+      <div className="space-y-5">
+        {v.questions.map((q) => {
+          const value = draft.answers[q.key]
+          return (
+            <div key={q.key}>
+              <p className="field-label">
+                {q.label}
+                {q.required && <span className="ml-1 text-rose-400">*</span>}
+              </p>
+              {q.kind === 'chips' && (
+                <TagInput
+                  value={Array.isArray(value) ? value : []}
+                  onChange={(next) => patch({ answers: { ...draft.answers, [q.key]: next } })}
+                  suggestions={q.suggestions ?? []}
+                />
+              )}
+              {q.kind === 'text' && (
+                <Input
+                  value={typeof value === 'string' ? value : ''}
+                  onChange={(e) => patch({ answers: { ...draft.answers, [q.key]: e.target.value } })}
+                  placeholder={q.placeholder}
+                />
+              )}
+              {q.kind === 'textarea' && (
+                <Textarea
+                  value={typeof value === 'string' ? value : ''}
+                  onChange={(e) => patch({ answers: { ...draft.answers, [q.key]: e.target.value } })}
+                  placeholder={q.placeholder}
+                />
+              )}
+              {q.kind === 'select' && (
+                <Select
+                  value={typeof value === 'string' ? value : ''}
+                  onChange={(e) => patch({ answers: { ...draft.answers, [q.key]: e.target.value } })}
+                >
+                  <option value="">Select…</option>
+                  {(q.options ?? []).map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </Select>
+              )}
+              {q.help && <p className="hint">{q.help}</p>}
+            </div>
+          )
+        })}
+      </div>
+
+      {missingRequired.length > 0 && (
+        <Alert tone="warning">
+          Answer {missingRequired.map((q) => q.label).join(', ')} before continuing.
+        </Alert>
+      )}
+    </StepShell>
+  )
+}
+
+function NotificationsStep({ draft, patch }: StepProps) {
+  const channels = draft.channels
+  const setChannel = (index: number, values: Partial<WizardDraft['channels'][number]>) =>
+    patch({ channels: channels.map((c, i) => (i === index ? { ...c, ...values } : c)) })
+
+  return (
+    <StepShell
+      title="Where do enquiries go?"
+      description="Leads, quotes and handoffs are pushed to these destinations. A tenant with no destination configured will collect leads that nobody reads."
+      icon={<Webhook className="h-4 w-4" />}
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input
+          label="Sales / enquiries email"
+          type="email"
+          value={draft.salesEmail}
+          onChange={(e) => patch({ salesEmail: e.target.value })}
+          placeholder="sales@example.com"
+        />
+        <Input
+          label="Support email"
+          type="email"
+          value={draft.notificationsSupportEmail}
+          onChange={(e) => patch({ notificationsSupportEmail: e.target.value })}
+          placeholder="support@example.com"
+        />
+      </div>
+      <Input
+        label="Brochure URL"
+        value={draft.brochureUrl}
+        onChange={(e) => patch({ brochureUrl: e.target.value })}
+        placeholder="https://example.com/brochure.pdf"
+        hint="Sent when a customer asks for the brochure. Leave blank to disable it."
+      />
+
+      <div>
+        <SectionTitle hint="Webhooks are signed with X-Signature-256 — the tenant's HMAC secret.">
+          Extra channels
+        </SectionTitle>
+        <div className="space-y-2.5">
+          {channels.map((channel, index) => (
+            <div key={index} className="grid items-end gap-2.5 rounded-lg bg-surface-panel p-3 ring-1 ring-inset ring-surface-line sm:grid-cols-[130px_1fr_1fr_auto]">
+              <Select
+                label="Type"
+                value={channel.type}
+                onChange={(e) => setChannel(index, { type: e.target.value as 'email' | 'webhook' })}
+              >
+                <option value="email">Email</option>
+                <option value="webhook">Webhook</option>
+              </Select>
+              <Input
+                label="Destination"
+                value={channel.to}
+                onChange={(e) => setChannel(index, { to: e.target.value })}
+                placeholder={channel.type === 'email' ? 'team@example.com' : 'https://crm.example.com/hook'}
+              />
+              <Input
+                label="Label"
+                value={channel.label}
+                onChange={(e) => setChannel(index, { label: e.target.value })}
+                placeholder="CRM"
+              />
+              <Button variant="ghost" size="sm" onClick={() => patch({ channels: channels.filter((_, i) => i !== index) })}>
+                Remove
+              </Button>
+            </div>
+          ))}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => patch({ channels: [...channels, { type: 'webhook', to: '', label: '' }] })}
+          >
+            Add channel
+          </Button>
+        </div>
+      </div>
+    </StepShell>
+  )
+}
+
+function GuardrailsStep({ draft, patch }: StepProps) {
+  return (
+    <StepShell
+      title="What must the bot never do?"
+      description="Guardrails bind the language model. Statements listed here are refused, and the escalation keywords hand the conversation to a person."
+      icon={<ShieldAlert className="h-4 w-4" />}
+    >
+      <Textarea
+        label="Never state (one per line)"
+        value={draft.neverState}
+        onChange={(e) => patch({ neverState: e.target.value })}
+        placeholder={'We guarantee delivery in 24 hours\nOur stock is always in sync\nNo hidden charges, ever'}
+        hint="The bot must not claim these. Empty means the vertical default applies."
+      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <p className="field-label">Forbidden terms</p>
+          <TagInput
+            value={draft.forbiddenTerms}
+            onChange={(forbiddenTerms) => patch({ forbiddenTerms })}
+            placeholder="Terms to refuse"
+          />
+        </div>
+        <div>
+          <p className="field-label">Handoff keywords</p>
+          <TagInput
+            value={draft.handoffKeywords}
+            onChange={(handoffKeywords) => patch({ handoffKeywords })}
+            placeholder="human, agent…"
+          />
+        </div>
+      </div>
+      <div>
+        <p className="field-label">Escalate immediately on</p>
+        <TagInput
+          value={draft.escalateKeywords}
+          onChange={(escalateKeywords) => patch({ escalateKeywords })}
+          placeholder="complaint, fraud, urgent…"
+        />
+      </div>
+      <Textarea
+        label="Escalation message"
+        value={draft.escalationMessage}
+        onChange={(e) => patch({ escalationMessage: e.target.value })}
+        rows={2}
+      />
+      <Alert tone="warning" title="Write these carefully">
+        The linter flags a profile when a forbidden term leaks back into its own copy. Keep the two lists
+        disjoint.
+      </Alert>
+    </StepShell>
+  )
+}
+
+function ReviewStep({ draft, onEdit }: { draft: WizardDraft; onEdit: (step: number) => void }) {
+  const v = getVertical(draft.vertical)
+  const on = new Set(draft.features)
+  const answers = Object.entries(draft.answers).filter(([, value]) =>
+    Array.isArray(value) ? value.length : Boolean(value),
+  )
+
+  const rows: { label: string; value: React.ReactNode; step: number }[] = [
+    { label: 'Company', value: draft.companyName || '—', step: 0 },
+    { label: 'Tenant id', value: draft.tenantId || '—', step: 0 },
+    { label: 'Field', value: v.label, step: 0 },
+    { label: 'Website', value: draft.website || '—', step: 0 },
+    { label: 'Phone number id', value: draft.wabaPhoneId || 'not bound', step: 1 },
+    {
+      label: 'Working hours',
+      value: draft.alwaysOpen
+        ? 'Always open'
+        : `${draft.openTime}–${draft.closeTime} · ${draft.timezone} · ${draft.openDays.length} day(s)`,
+      step: 1,
+    },
+    { label: 'Bot name', value: draft.botName || v.label, step: 2 },
+    { label: 'Tone', value: draft.tone, step: 2 },
+    { label: 'Support', value: [draft.supportEmail, draft.supportPhone].filter(Boolean).join(' · ') || '—', step: 2 },
+    { label: 'Calls it', value: v.nouns.item, step: 2 },
+    {
+      label: 'Capabilities',
+      value: (
+        <span className="flex flex-wrap gap-1.5">
+          {FEATURE_GROUPS.flatMap((g) => g.flags)
+            .filter((f) => on.has(f))
+            .map((f) => (
+              <span key={f} className="rounded bg-surface-panel px-1.5 py-0.5 text-xs text-slate-300">
+                {FEATURE_LABELS[f].label}
+              </span>
+            ))}
+        </span>
+      ),
+      step: 3,
+    },
+    {
+      label: 'Business answers',
+      value: answers.length ? (
+        <ul className="space-y-1">
+          {answers.map(([key, value]) => (
+            <li key={key} className="text-xs text-slate-300">
+              <span className="text-slate-500">{key.replace(/_/g, ' ')}:</span>{' '}
+              {Array.isArray(value) ? value.join(', ') : value}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        '—'
+      ),
+      step: 4,
+    },
+    {
+      label: 'Notifications',
+      value:
+        [draft.salesEmail, draft.notificationsSupportEmail, draft.brochureUrl].filter(Boolean).join(' · ') ||
+        'none configured',
+      step: 5,
+    },
+    {
+      label: 'Never state',
+      value: draft.neverState ? draft.neverState.split('\n').filter(Boolean).length + ' rule(s)' : '—',
+      step: 6,
+    },
+  ]
+
+  return (
+    <StepShell
+      title="Review and publish"
+      description="Creating the tenant registers it, saves this as the draft, then publishes version 1. If validation fails, nothing is published and you can fix it in the profile editor."
+      icon={<BadgeCheck className="h-4 w-4" />}
+    >
+      <div className="divide-y divide-surface-line rounded-lg ring-1 ring-inset ring-surface-line">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-start gap-4 px-4 py-3">
+            <span className="w-40 shrink-0 text-xs text-slate-500">{row.label}</span>
+            <span className="min-w-0 flex-1 text-xs text-slate-200">
+              {typeof row.value === 'string' ? row.value : row.value}
+            </span>
+            <button
+              type="button"
+              onClick={() => onEdit(row.step)}
+              className="shrink-0 text-xs text-accent-700 hover:text-accent-700"
+            >
+              Edit
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <Alert tone="info" title="What publishing does">
+        The snapshot is merged over the {v.short} defaults, validated, stored as an immutable version, and the
+        runtime cache is purged — so the next message is answered by the profile above.
+      </Alert>
+    </StepShell>
+  )
+}
+
+// ── helpers ────────────────────────────────────────────────────────────────
+
+interface StepProps {
+  draft: WizardDraft
+  patch: (values: Partial<WizardDraft>) => void
+}
+
+function answerValue(draft: WizardDraft, key: string): string {
+  const value = draft.answers[key]
+  if (Array.isArray(value)) return value.join(', ')
+  return typeof value === 'string' ? value : ''
+}
+
+function validationError(step: number, draft: WizardDraft, idTaken: boolean): string | null {
+  switch (step) {
+    case 0:
+      if (!draft.companyName.trim()) return 'A company name is required.'
+      if (!draft.tenantId.trim()) return 'A tenant id is required.'
+      if (idTaken) return 'That tenant id is already registered.'
+      return null
+    case 1:
+      if (!draft.alwaysOpen && draft.openDays.length === 0) return 'Pick at least one working day.'
+      return null
+    case 2:
+      if (!draft.botName.trim() && !draft.companyName.trim())
+        return 'Give the bot a name or a company name.'
+      return null
+    case 4: {
+      const v = getVertical(draft.vertical)
+      const missing = v.questions.filter((q) => q.required && !answerValue(draft, q.key))
+      if (missing.length) return `Still needed: ${missing.map((q) => q.label).join(', ')}.`
+      return null
+    }
+    case 5: {
+      const bad = draft.channels.find((c) => c.to.trim() && !c.to.includes('@') && !c.to.startsWith('http'))
+      if (bad) return `Channel destination looks wrong: ${bad.to}`
+      return null
+    }
+    case 6:
+      if (draft.forbiddenTerms.some((t) => draft.neverState.toLowerCase().includes(t.toLowerCase())))
+        return 'A forbidden term also appears in your "never state" list.'
+      return null
+    default:
+      return null
+  }
+}

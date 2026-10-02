@@ -1,0 +1,91 @@
+{
+  "tenant_id": "meridianbank",
+  "vertical": "banking",
+  "display_name": "Meridian Bank",
+
+  "brand": {
+    "name": "Meridian Bank",
+    "bot_name": "Meridian Assistant",
+    "tagline": "a full-service bank for savings, cards, loans, and everyday banking",
+    "website": "www.meridianbank.example",
+    "support_email": "care@meridianbank.example",
+    "support_phone": "1800 123 4567",
+    "signature": "Meridian Bank — Banking that puts you first."
+  },
+
+  "features": {
+    "cart": false,
+    "buy_now": false,
+    "orders": false,
+    "track_order": false,
+    "returns": false,
+    "brochure_pdf": false,
+    "distributors": false,
+    "offerings": true,
+    "offering_details": true,
+    "lead_capture": true,
+    "quote": false,
+    "callback": true,
+    "book_appointment": true,
+    "handoff": true,
+    "faq": true,
+    "kb": true,
+    "complaints": true,
+    "campaigns": false,
+    "human_handover": true
+  },
+
+  "vocabulary": {
+    "item_noun": "products",
+    "item_noun_singular": "product",
+    "browse_label": "Banking Products",
+    "catalog_label": "Products",
+    "catalog_noun": "products",
+    "lead_noun": "request",
+    "enquiry_label": "Check Eligibility",
+    "quote_label": "Enquire",
+    "callback_label": "Request a Callback",
+    "support_label": "Raise a Complaint"
+  },
+
+  "business_hours": {
+    "timezone": "Asia/Kolkata",
+    "always_open": false,
+    "open": "09:00",
+    "close": "18:00",
+    "open_days": [0, 1, 2, 3, 4]
+  },
+
+  "guardrails": {
+    "never_state": [
+      "account balances, transaction history, or any account-specific data",
+      "OTP, PIN, password, or card values — we never ask for them on chat",
+      "Aadhaar, PAN, or full card numbers",
+      "loan approvals or guaranteed approval of any kind",
+      "interest rates as offers — share the published range only, team confirms final rate"
+    ],
+    "escalate_keywords": [
+      "fraud", "unauthorised", "unauthorized", "stolen card", "lost card",
+      "account frozen", "money deducted twice", "harassment", "urgent"
+    ],
+    "escalation_message": "That needs our fraud and security desk right away — connecting you now.",
+    "handoff_keywords": ["human", "agent", "manager", "fraud", "urgent", "complaint"]
+  },
+
+  "notifications": {
+    "sales_email": "care@meridianbank.example",
+    "support_email": "grievance@meridianbank.example",
+    "brochure_url": "",
+    "brochure_label": "Product Guide",
+    "channels": [
+      { "type": "email", "to": "grievance@meridianbank.example", "label": "grievance desk" }
+    ]
+  },
+
+  "flows": [
+    {
+      "name": "raise_ticket",
+      "success_message": "Your reference has been logged with our grievance desk. We respond within 24 hours."
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "tenant_id": "northwindcapital",
+  "vertical": "finance",
+  "display_name": "Northwind Capital",
+
+  "brand": {
+    "name": "Northwind Capital",
+    "bot_name": "Northwind Assistant",
+    "tagline": "a financial advisory firm for tax planning, investments, and business compliance",
+    "website": "www.northwindcapital.example",
+    "support_email": "hello@northwindcapital.example",
+    "support_phone": "+91 98765 11111",
+    "signature": "Northwind Capital — Clarity in every financial decision."
+  },
+
+  "features": {
+    "cart": false,
+    "buy_now": false,
+    "orders": false,
+    "track_order": false,
+    "returns": false,
+    "brochure_pdf": true,
+    "distributors": false,
+    "offerings": true,
+    "offering_details": true,
+    "lead_capture": true,
+    "quote": true,
+    "callback": true,
+    "book_appointment": true,
+    "handoff": true,
+    "faq": true,
+    "kb": true,
+    "complaints": true,
+    "campaigns": false,
+    "human_handover": true
+  },
+
+  "vocabulary": {
+    "item_noun": "services",
+    "item_noun_singular": "service",
+    "browse_label": "Our Services",
+    "catalog_label": "Services",
+    "catalog_noun": "services",
+    "brochure_label": "Service Guide",
+    "brochure_noun": "service guide",
+    "lead_noun": "requirement",
+    "enquiry_label": "Enquire",
+    "quote_label": "Request a Proposal",
+    "callback_label": "Book a Consultation",
+    "support_label": "Raise Ticket"
+  },
+
+  "business_hours": {
+    "timezone": "Asia/Kolkata",
+    "always_open": false,
+    "open": "09:30",
+    "close": "18:30",
+    "open_days": [0, 1, 2, 3, 4]
+  },
+
+  "guardrails": {
+    "never_state": [
+      "returns, projections, or any performance promises — past performance is not a guarantee",
+      "fee commitments before the engagement letter",
+      "tax outcomes or savings figures specific to a client",
+      "client names without written consent",
+      "specific investment advice before a signed engagement and risk profile"
+    ],
+    "escalate_keywords": [
+      "notice", "income tax notice", "gst notice", "audit", "litigation",
+      "missed deadline", "penalty"
+    ],
+    "escalation_message": "That needs a qualified advisor — I'm connecting you with our team now.",
+    "handoff_keywords": ["human", "agent", "manager", "notice", "urgent", "complaint"]
+  },
+
+  "notifications": {
+    "sales_email": "advisors@northwindcapital.example",
+    "support_email": "hello@northwindcapital.example",
+    "brochure_url": "",
+    "brochure_label": "Service Guide",
+    "channels": [
+      { "type": "email", "to": "advisors@northwindcapital.example", "label": "advisors" }
+    ]
+  },
+
+  "flows": [
+    {
+      "name": "get_quote",
+      "success_message": "Thanks! An advisor has your details and will reach out with a proposal shortly."
+    }
+  ]
+}

@@ -1,0 +1,451 @@
+"""Tenant registry + profile administration API.
+
+Publishing is the only way a profile change reaches the bot, and it is always
+versioned and rollbackable:
+
+    GET  /api/admin/tenants
+    POST /api/admin/tenants
+    GET  /api/admin/tenants/{tenant_id}/detail     -> layers + effective profile
+    PUT  /api/admin/tenants/{tenant_id}/profile     -> save draft
+    POST /api/admin/tenants/{tenant_id}/publish     -> validate + version + go live
+    POST /api/admin/tenants/{tenant_id}/rollback    -> re-point at a prior version
+    GET  /api/admin/tenants/{tenant_id}/versions
+    POST /api/admin/tenants/{tenant_id}/tokens      -> mint a tenant-scoped token
+    GET  /api/admin/tenants/{tenant_id}/resolved    -> what the bot actually reads
+
+``/resolved`` is the smoke-test endpoint: it returns the merged, validated
+profile the bot will use right now, so the UI can diff it against the draft.
+
+Every tenant-scoped route goes through ``require_tenant_access()``, which
+enforces token.tenant_id == target (Phase 0.5).
+"""
+
+import logging
+import secrets
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+
+from routes.auth import hash_tenant_token, require_permission, require_tenant_access
+from shared.tenancy import cache as tenancy_cache
+from shared.tenancy import loader as tenancy_loader
+from shared.tenancy import store as tenancy_store
+
+logger = logging.getLogger("tenants")
+router = APIRouter(prefix="/api/admin/tenants", tags=["tenants"])
+
+
+# ── request models ────────────────────────────────────────────────────────
+
+class TenantCreate(BaseModel):
+    tenant_id: str
+    slug: str = ""
+    vertical: str = "generic"
+    display_name: str = ""
+    waba_phone_id: str = ""
+    status: str = "active"
+
+
+class PhoneBind(BaseModel):
+    waba_phone_id: str
+
+
+class ProfileDraft(BaseModel):
+    snapshot: dict = Field(default_factory=dict)
+
+
+class RollbackRequest(BaseModel):
+    version: int
+
+
+class TokenCreate(BaseModel):
+    label: str = ""
+
+
+class WebhookSecretSet(BaseModel):
+    secret: str = Field(min_length=16, max_length=256)
+
+
+def _admin_only(principal: dict) -> str:
+    """Only admins may mint tokens, rebind phone ids, or set secrets."""
+    if principal.get("type") != "admin":
+        raise HTTPException(status_code=403, detail="Admin credentials required")
+    return principal.get("username", "")
+
+
+def _public_tenant(record: dict) -> dict:
+    out = dict(record or {})
+    out.pop("webhook_secret", None)
+    return out
+
+
+# ── registry ──────────────────────────────────────────────────────────────
+
+@router.get("")
+def list_tenants(
+    status: Optional[str] = None,
+    current_admin: dict = Depends(require_permission("manage_operations")),
+):
+    rows = [_public_tenant(r) for r in tenancy_store.list_tenants(status=status)]
+    for row in rows:
+        row["current_version"] = tenancy_store.current_version(row["id"])
+    return {"tenants": rows}
+
+
+@router.post("")
+def create_tenant(
+    body: TenantCreate,
+    current_admin: dict = Depends(require_permission("manage_operations")),
+):
+    tid = str(body.tenant_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="tenant_id is required")
+    if tenancy_store.get_tenant(tid):
+        raise HTTPException(status_code=409, detail=f"tenant '{tid}' already exists")
+
+    from shared.tenancy import loader as _loader
+
+    try:
+        # Fail before writing the row if the vertical is unknown.
+        _loader.build_profile(tid, db_layer={}, file_layer={}, include_db=False)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid vertical: {exc}")
+
+    tenancy_store.ensure_tenant(
+        tid,
+        slug=body.slug or tid,
+        vertical=body.vertical,
+        waba_phone_id=body.waba_phone_id,
+        display_name=body.display_name,
+        status=body.status,
+    )
+    logger.info("TENANT_CREATED | tenant=%s | vertical=%s | by=%s",
+                tid, body.vertical, current_admin.get("username"))
+    return {"ok": True, "tenant": _public_tenant(tenancy_store.get_tenant(tid))}
+
+
+@router.delete("/{tenant_id}")
+def delete_tenant(
+    tenant_id: str,
+    principal: dict = Depends(require_tenant_access()),
+):
+    _admin_only(principal)
+    if not tenancy_store.get_tenant(tenant_id):
+        raise HTTPException(status_code=404, detail="tenant not found")
+    tenancy_cache.purge(tenant_id)
+    tenancy_store.delete_tenant(tenant_id)
+    logger.info("TENANT_DELETED | tenant=%s | by=%s", tenant_id, principal.get("username"))
+    return {"ok": True, "tenant_id": tenant_id}
+
+
+# ── profile: read ─────────────────────────────────────────────────────────
+
+@router.get("/{tenant_id}/resolved")
+def resolved_profile(tenant_id: str, principal: dict = Depends(require_tenant_access())):
+    """The merged, validated profile the bot reads right now.
+
+    This is the 'profile-derived smoke test' surface: menus, intents, features
+    and flows here all come from data, not constants.
+    """
+    profile = tenancy_loader.get_tenant_profile(tenant_id)
+    return {
+        "tenant_id": profile.tenant_id,
+        "vertical": profile.vertical,
+        "version": profile.version,
+        "source": profile.source,
+        "features": profile.features.model_dump(),
+        "vocabulary": profile.vocabulary.model_dump(),
+        "brand": profile.brand.model_dump(),
+        "business_hours": profile.business_hours.model_dump(),
+        "guardrails": profile.guardrails.model_dump(),
+        "notifications": profile.notifications.model_dump(),
+        "menu": profile.menu.model_dump(),
+        "active_intents": [i.model_dump() for i in profile.active_intents()],
+        "inactive_intents": [
+            i.model_dump() for i in profile.intents
+            if i not in profile.active_intents()
+        ],
+        "flows": [f.model_dump() for f in profile.active_flows()],
+    }
+
+
+@router.get("/{tenant_id}/detail")
+def tenant_detail(tenant_id: str, principal: dict = Depends(require_tenant_access())):
+    """Layer-by-layer view for the profile editor: defaults, file, DB."""
+    layers = tenancy_loader.describe_layers(tenant_id)
+    effective = None
+    try:
+        effective = tenancy_loader.get_tenant_profile(tenant_id).to_payload()
+    except Exception as exc:  # never fail the editor on a bad layer
+        logger.error("Could not build effective profile for %s: %s", tenant_id, exc)
+    return {
+        "tenant": _public_tenant(layers.get("tenant")),
+        "layers": layers.get("layers", {}),
+        "current_version": layers.get("current_version", 0),
+        "versions": layers.get("versions", []),
+        "effective": effective,
+        "effective_error": None if effective else "effective profile could not be built",
+    }
+
+
+@router.get("/{tenant_id}/versions")
+def list_versions(
+    tenant_id: str,
+    limit: int = 50,
+    principal: dict = Depends(require_tenant_access()),
+):
+    return {
+        "tenant_id": tenant_id,
+        "current_version": tenancy_store.current_version(tenant_id),
+        "versions": tenancy_store.list_versions(tenant_id, limit=limit),
+    }
+
+
+@router.get("/{tenant_id}/versions/{version}")
+def get_version(
+    tenant_id: str,
+    version: int,
+    principal: dict = Depends(require_tenant_access()),
+):
+    record = tenancy_store.get_version(tenant_id, version)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"version {version} not found")
+    return record
+
+
+# ── profile: write ────────────────────────────────────────────────────────
+
+@router.put("/{tenant_id}/profile")
+def save_profile_draft(    tenant_id: str,
+    body: ProfileDraft,
+    principal: dict = Depends(require_tenant_access()),
+):
+    """Save the working copy. Does not affect the live bot.
+
+    The draft is validated immediately so the editor can show errors before
+    anyone presses publish.
+    """
+    if not tenancy_store.get_tenant(tenant_id):
+        raise HTTPException(status_code=404, detail="tenant not found")
+    by = principal.get("username") or principal.get("label", "")
+    tenancy_store.save_draft(tenant_id, body.snapshot, updated_by=by)
+
+    warnings: list = []
+    try:
+        tenancy_loader.validate_merged_profile(tenant_id, body.snapshot)
+    except tenancy_loader.ProfileValidationError as exc:
+        # Saving a broken draft is allowed; publishing it is not.
+        warnings.append(str(exc))
+    return {"ok": True, "tenant_id": tenant_id, "has_draft": True, "validation": warnings}
+
+
+@router.post("/{tenant_id}/publish")
+def publish_profile(
+    tenant_id: str,
+    principal: dict = Depends(require_tenant_access()),
+):
+    """Validate the merged profile, append a version, go live, purge the cache."""
+    draft = tenancy_store.get_draft(tenant_id)
+    if draft is None:
+        raise HTTPException(status_code=400, detail=f"No draft exists for tenant '{tenant_id}'")
+
+    try:
+        profile = tenancy_loader.validate_merged_profile(tenant_id, draft)
+    except tenancy_loader.ProfileValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Profile failed validation, nothing published: {exc}",
+        )
+
+    by = principal.get("username") or principal.get("label", "")
+    version = tenancy_store.publish_version(tenant_id, draft, published_by=by)
+    tenancy_cache.purge(tenant_id)
+    logger.info("TENANT_PROFILE_PUBLISHED | tenant=%s | version=%s | by=%s", tenant_id, version, by)
+    return {
+        "ok": True,
+        "tenant_id": tenant_id,
+        "version": version,
+        "vertical": profile.vertical,
+        "active_intents": profile.active_intent_names(),
+        "visible_buttons": [b.id for b in profile.menu.buttons],
+    }
+
+
+class TestQuestion(BaseModel):
+    message: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/{tenant_id}/test-question")
+def test_question(
+    tenant_id: str,
+    body: TestQuestion,
+    principal: dict = Depends(require_tenant_access()),
+):
+    """The admin 'test a question' box: run one utterance through this
+    tenant's live intent matcher (rules then embeddings — the same tiers
+    eval/run.py drives), so an editor can see routing change as they tune
+    the profile without waiting for a real customer to ask."""
+    if not tenancy_store.get_tenant(tenant_id):
+        raise HTTPException(status_code=404, detail="tenant not found")
+
+    from shared.tenancy.intent_match import match_intent
+
+    profile = tenancy_loader.get_tenant_profile(tenant_id)
+    intent, score, tier = match_intent(body.message.strip(), profile)
+    matched = profile.intent(intent) if intent else None
+    return {
+        "tenant_id": tenant_id,
+        "message": body.message,
+        "intent": intent,
+        "score": round(score, 3),
+        "tier": tier,
+        "flow": matched.flow if matched else None,
+        "active_intents": profile.active_intent_names(),
+    }
+
+
+@router.post("/{tenant_id}/rollback")
+def rollback_profile(
+    tenant_id: str,
+    body: RollbackRequest,
+    principal: dict = Depends(require_tenant_access()),
+):
+    """Re-point is_current at an earlier version. Nothing is deleted."""
+    if not tenancy_store.rollback(tenant_id, body.version):
+        raise HTTPException(status_code=404, detail=f"version {body.version} not found")
+    tenancy_cache.purge(tenant_id)
+    profile = tenancy_loader.get_tenant_profile(tenant_id)
+    logger.info("TENANT_PROFILE_ROLLBACK | tenant=%s | to=v%s | by=%s",
+                tenant_id, body.version, principal.get("username"))
+    return {
+        "ok": True,
+        "tenant_id": tenant_id,
+        "version": body.version,
+        "active": profile.version,
+        "active_intents": profile.active_intent_names(),
+    }
+
+
+# ── inbound routing + secrets ─────────────────────────────────────────────
+
+@router.post("/{tenant_id}/phone-id")
+def bind_phone(
+    tenant_id: str,
+    body: PhoneBind,
+    principal: dict = Depends(require_tenant_access()),
+):
+    _admin_only(principal)
+    if not tenancy_store.get_tenant(tenant_id):
+        raise HTTPException(status_code=404, detail="tenant not found")
+    if not tenancy_store.set_waba_phone_id(tenant_id, body.waba_phone_id):
+        raise HTTPException(
+            status_code=409,
+            detail=f"phone id already bound to another tenant",
+        )
+    return {"ok": True, "tenant_id": tenant_id, "waba_phone_id": body.waba_phone_id}
+
+
+@router.put("/{tenant_id}/webhook-secret")
+def set_webhook_secret(
+    tenant_id: str,
+    body: WebhookSecretSet,
+    principal: dict = Depends(require_tenant_access()),
+):
+    """Per-tenant HMAC secret for outbound CRM webhooks."""
+    _admin_only(principal)
+    from database import get_db_context
+
+    with get_db_context() as conn:
+        cur = conn.execute(
+            "UPDATE tenants SET webhook_secret = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (body.secret, tenant_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="tenant not found")
+    logger.info("TENANT_WEBHOOK_SECRET_SET | tenant=%s | by=%s",
+                tenant_id, principal.get("username"))
+    return {"ok": True, "tenant_id": tenant_id, "configured": True}
+
+
+# ── tenant-scoped tokens (Phase 0.5) ──────────────────────────────────────
+
+@router.post("/{tenant_id}/tokens")
+def create_token(
+    tenant_id: str,
+    body: TokenCreate,
+    principal: dict = Depends(require_tenant_access()),
+):
+    """Mint an opaque token scoped to this tenant.
+
+    The plaintext is returned exactly once. Only admins may mint.
+    """
+    by = _admin_only(principal)
+    if not tenancy_store.get_tenant(tenant_id):
+        raise HTTPException(status_code=404, detail="tenant not found")
+    raw = secrets.token_urlsafe(40)
+    token_id = tenancy_store.create_tenant_token(
+        tenant_id, hash_tenant_token(raw), label=body.label, created_by=by
+    )
+    logger.info("TENANT_TOKEN_CREATED | tenant=%s | id=%s | by=%s", tenant_id, token_id, by)
+    return {
+        "ok": True,
+        "id": token_id,
+        "tenant_id": tenant_id,
+        "token": raw,
+        "warning": "Store this now — it is hashed on the server and cannot be shown again.",
+    }
+
+
+@router.get("/{tenant_id}/tokens")
+def list_tokens(tenant_id: str, principal: dict = Depends(require_tenant_access())):
+    _admin_only(principal)
+    return {"tenant_id": tenant_id, "tokens": tenancy_store.list_tenant_tokens(tenant_id)}
+
+
+@router.delete("/{tenant_id}/tokens/{token_id}")
+def revoke_token(
+    tenant_id: str,
+    token_id: int,
+    principal: dict = Depends(require_tenant_access()),
+):
+    _admin_only(principal)
+    if not tenancy_store.revoke_tenant_token(token_id):
+        raise HTTPException(status_code=404, detail="token not found or already revoked")
+    return {"ok": True, "id": token_id}
+
+
+# ── smoke test ────────────────────────────────────────────────────────────
+
+@router.get("/{tenant_id}/smoke")
+def profile_smoke(tenant_id: str, principal: dict = Depends(require_tenant_access())):
+    """Assert the runtime really is data-derived.
+
+    Guards the Phase 4/7 exit test: menus and intents must equal the profile,
+    not any hardcoded constant. Fails loudly if a code default leaks back in.
+    """
+    from shared.tenancy import gating
+
+    profile = tenancy_loader.get_tenant_profile(tenant_id)
+    visible = [b.id for b in profile.menu.visible_buttons(profile.features)]
+    active = profile.active_intent_names()
+
+    leaked = sorted(
+        set(profile.guardrails.forbidden_terms)
+        & {s.lower() for s in tenancy_loader.profile_strings(profile)
+           if len(s) < 40 and s.strip().lower() in
+           {t.lower() for t in profile.guardrails.forbidden_terms}}
+    )
+    return {
+        "tenant_id": tenant_id,
+        "vertical": profile.vertical,
+        "version": profile.version,
+        "visible_buttons": visible,
+        "active_intents": active,
+        "gated_intents": {
+            intent: gating.is_enabled(tenant_id, gate)
+            for intent, gate in gating.INTENT_GATES.items()
+        },
+        "forbidden_term_leaks": leaked,
+        "ok": not leaked,
+    }

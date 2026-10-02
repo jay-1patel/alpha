@@ -1,0 +1,97 @@
+{
+  "tenant_id": "wanderly",
+  "vertical": "tours_travel",
+  "display_name": "Wanderly Travel",
+
+  "brand": {
+    "name": "Wanderly Travel",
+    "bot_name": "Wanderly Assistant",
+    "tagline": "a travel agency crafting domestic and international tour packages",
+    "website": "www.wanderly.travel",
+    "support_email": "hello@wanderly.travel",
+    "support_phone": "+91 98765 00000",
+    "signature": "Wanderly Travel — See the world, one trip at a time."
+  },
+
+  "features": {
+    "cart": false,
+    "buy_now": false,
+    "orders": false,
+    "track_order": false,
+    "returns": false,
+    "brochure_pdf": true,
+    "distributors": false,
+    "offerings": true,
+    "offering_details": true,
+    "lead_capture": true,
+    "quote": true,
+    "callback": true,
+    "book_appointment": true,
+    "handoff": true,
+    "faq": true,
+    "kb": true,
+    "complaints": true,
+    "campaigns": false,
+    "human_handover": true
+  },
+
+  "vocabulary": {
+    "item_noun": "packages",
+    "item_noun_singular": "package",
+    "browse_label": "Tour Packages",
+    "catalog_label": "Packages",
+    "catalog_noun": "packages",
+    "brochure_label": "Travel Brochure",
+    "brochure_noun": "brochure",
+    "offer_noun": "deal",
+    "offer_noun_plural": "deals",
+    "lead_noun": "trip request",
+    "enquiry_label": "Enquire",
+    "quote_label": "Get a Quote",
+    "callback_label": "Book a Callback",
+    "support_label": "Raise Ticket"
+  },
+
+  "business_hours": {
+    "timezone": "Asia/Kolkata",
+    "always_open": false,
+    "open": "09:00",
+    "close": "19:00",
+    "open_days": [0, 1, 2, 3, 4, 5]
+  },
+
+  "guardrails": {
+    "never_state": [
+      "package prices before the team confirms availability and dates",
+      "visa approval guarantees",
+      "flight schedules or hotel names before the booking is confirmed"
+    ],
+    "escalate_keywords": [
+      "missed flight", "lost luggage", "medical emergency", "passport lost",
+      "visa denied", "no-show", "accident"
+    ],
+    "escalation_message": "Let me get you to a travel specialist right away.",
+    "handoff_keywords": ["human", "agent", "manager", "urgent", "complaint"]
+  },
+
+  "notifications": {
+    "sales_email": "trips@wanderly.travel",
+    "support_email": "hello@wanderly.travel",
+    "brochure_url": "",
+    "brochure_label": "Travel Brochure",
+    "channels": [
+      { "type": "email", "to": "trips@wanderly.travel", "label": "sales" }
+    ]
+  },
+
+  "flows": [
+    {
+      "name": "get_quote",
+      "success_message": "Thanks! Our trip planners have your details and will send options shortly."
+    },
+    {
+      "name": "raise_ticket",
+      "success_message": "Ticket raised. Our support team will get back to you shortly."
+    }
+  ]
+}

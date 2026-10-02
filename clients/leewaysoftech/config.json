@@ -1,0 +1,97 @@
+{
+  "tenant_id": "leewaysoftech",
+  "vertical": "it_software",
+  "display_name": "Leewaysoftech",
+
+  "brand": {
+    "name": "Leewaysoftech",
+    "bot_name": "Leewaysoftech Assistant",
+    "tagline": "a software development company building web, mobile, and enterprise solutions",
+    "website": "www.leewaysoftech.com",
+    "support_email": "info@leewaysoftech.com",
+    "support_phone": "+91 98765 43210",
+    "signature": "Leewaysoftech — Building software that moves business forward."
+  },
+
+  "features": {
+    "cart": false,
+    "buy_now": false,
+    "orders": false,
+    "track_order": false,
+    "returns": false,
+    "brochure_pdf": true,
+    "distributors": false,
+    "offerings": true,
+    "offering_details": true,
+    "lead_capture": true,
+    "quote": true,
+    "callback": true,
+    "book_appointment": true,
+    "handoff": true,
+    "faq": true,
+    "kb": true,
+    "complaints": true,
+    "campaigns": false,
+    "human_handover": true
+  },
+
+  "vocabulary": {
+    "item_noun": "services",
+    "item_noun_singular": "service",
+    "browse_label": "Our Services",
+    "catalog_label": "Services",
+    "catalog_noun": "services",
+    "brochure_label": "Company Profile",
+    "brochure_noun": "company profile",
+    "offer_noun": "engagement",
+    "offer_noun_plural": "engagements",
+    "lead_noun": "requirement",
+    "enquiry_label": "Enquire",
+    "quote_label": "Get a Quote",
+    "callback_label": "Request a Callback",
+    "support_label": "Raise Ticket"
+  },
+
+  "business_hours": {
+    "timezone": "Asia/Kolkata",
+    "always_open": false,
+    "open": "09:30",
+    "close": "18:30",
+    "open_days": [0, 1, 2, 3, 4]
+  },
+
+  "guardrails": {
+    "never_state": [
+      "prices, budgets, or rates before the team confirms a quote",
+      "delivery dates without team confirmation",
+      "client names without their written permission"
+    ],
+    "escalate_keywords": [
+      "production down", "urgent bug", "security breach", "data loss",
+      "legal", "contract dispute"
+    ],
+    "escalation_message": "That needs a person from our team — connecting you now.",
+    "handoff_keywords": ["human", "agent", "manager", "urgent", "complaint"]
+  },
+
+  "notifications": {
+    "sales_email": "sales@leewaysoftech.com",
+    "support_email": "info@leewaysoftech.com",
+    "brochure_url": "",
+    "brochure_label": "Company Profile",
+    "channels": [
+      { "type": "email", "to": "sales@leewaysoftech.com", "label": "sales" }
+    ]
+  },
+
+  "flows": [
+    {
+      "name": "get_quote",
+      "success_message": "Thanks! Our team has your project details and will reach out with next steps shortly."
+    },
+    {
+      "name": "raise_ticket",
+      "success_message": "Ticket raised. Our support team will get back to you shortly."
+    }
+  ]
+}
