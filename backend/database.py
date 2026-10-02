@@ -663,6 +663,7 @@ def init_db():
             ("role", "TEXT DEFAULT 'sub_admin'"),
             ("email", "TEXT"),
             ("updated_at", "TIMESTAMP"),
+            ("tenant_id", "TEXT"),
         ])
         _ensure_columns(conn, "admin_chat_messages", [
             ("deleted_for", "TEXT"),
