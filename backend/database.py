@@ -909,6 +909,7 @@ def init_db():
 
         _init_tenancy_tables(conn)
         _init_offerings_migration(conn)
+        _init_integration_tables(conn)
         _init_record_columns_table(conn)
         _init_conversation_state_columns(conn)
 
@@ -1057,6 +1058,110 @@ def _init_tenancy_tables(conn):
 
 
 # ── Phase 3: data-defined flows write leads and handoffs ─────────────────
+
+def _init_integration_tables(conn):
+    """Delivery/payment integration requests submitted from the chatbot.
+
+    A user's onboarding answers land here as `pending`; a super admin approves
+    or rejects them. Approval copies the config into the tenant's published
+    profile (integrations block) so checkout/orders can use it immediately.
+    """
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS integration_requests (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id           TEXT NOT NULL,
+            wa_id               TEXT NOT NULL,
+            delivery_provider   TEXT DEFAULT '',
+            delivery_config_json TEXT DEFAULT '{}',
+            payment_provider    TEXT DEFAULT '',
+            payment_config_json TEXT DEFAULT '{}',
+            status              TEXT NOT NULL DEFAULT 'pending'
+                                CHECK (status IN ('pending','approved','rejected')),
+            review_note         TEXT DEFAULT '',
+            reviewed_by         TEXT DEFAULT '',
+            reviewed_at         TIMESTAMP,
+            created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_integration_requests_tenant_status "
+        "ON integration_requests(tenant_id, status, created_at)"
+    )
+
+
+def save_integration_request(tenant_id: str, wa_id: str,
+                             delivery_provider: str, delivery_config: dict,
+                             payment_provider: str, payment_config: dict) -> int:
+    """Store a chatbot onboarding submission as a pending request."""
+    with get_db_context() as conn:
+        cur = conn.execute(
+            """INSERT INTO integration_requests
+               (tenant_id, wa_id, delivery_provider, delivery_config_json,
+                payment_provider, payment_config_json, status)
+               VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
+            (tenant_id, wa_id,
+             str(delivery_provider or ""), json.dumps(delivery_config or {}),
+             str(payment_provider or ""), json.dumps(payment_config or {})),
+        )
+        req_id = cur.lastrowid
+    logger.info("INTEGRATION_REQUEST | tenant=%s | wa=%s | id=%s | delivery=%s | payment=%s",
+                tenant_id, wa_id, req_id, delivery_provider, payment_provider)
+    return req_id
+
+
+def list_integration_requests(status: str = None, tenant_id: str = None) -> list:
+    """Integration requests, newest first, optionally filtered."""
+    sql = "SELECT * FROM integration_requests"
+    clauses, params = [], []
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if tenant_id:
+        clauses.append("tenant_id = ?")
+        params.append(tenant_id)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY created_at DESC"
+    with get_db_context() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["delivery_config"] = json.loads(d.pop("delivery_config_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            d["delivery_config"] = {}
+        try:
+            d["payment_config"] = json.loads(d.pop("payment_config_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            d["payment_config"] = {}
+        out.append(d)
+    return out
+
+
+def get_integration_request(req_id: int) -> dict | None:
+    rows = list_integration_requests()
+    for r in rows:
+        if r.get("id") == req_id:
+            return r
+    return None
+
+
+def update_integration_request_status(req_id: int, status: str,
+                                      reviewed_by: str = "",
+                                      review_note: str = "") -> bool:
+    if status not in ("approved", "rejected", "pending"):
+        return False
+    with get_db_context() as conn:
+        cur = conn.execute(
+            """UPDATE integration_requests
+               SET status = ?, reviewed_by = ?, review_note = ?,
+                   reviewed_at = CURRENT_TIMESTAMP
+               WHERE id = ? AND status = 'pending'""",
+            (status, reviewed_by, review_note, req_id),
+        )
+        return cur.rowcount > 0
+
 
 def _init_lead_tables(conn):
     """Leads and handoffs, both written by the profile-driven flow runner.
