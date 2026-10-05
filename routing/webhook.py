@@ -71,9 +71,7 @@ def _is_handover_active(wa_id: str) -> bool:
     try:
         conn = sqlite3.connect(db_path)
         row = conn.execute(
-            "SELECT human_handover FROM user_states "
-            "WHERE wa_id = ? ORDER BY updated_at DESC LIMIT 1",
-            (wa_id,),
+            "SELECT human_handover FROM user_states WHERE wa_id = ?", (wa_id,)
         ).fetchone()
         conn.close()
         return row is not None and row[0] == 1
@@ -325,6 +323,33 @@ async def _process_and_reply(wa_id, sender_name, user_text, msg_type, message, m
                         return
             except Exception as e:
                 logger.error(f"Profile flow start failed for button {pressed_id}: {e}")
+
+        # ── PROFILE-DEFINED INFORMATIONAL PANELS (Phase 3) ────────────
+        # A tapped menu row whose profile entry names an intent (Technologies,
+        # Portfolio, Careers, Benefits...) answers from the tenant's own
+        # configured text. Only a found answer consumes the tap — everything
+        # else falls through to the pipeline below unchanged.
+        if pressed_id:
+            try:
+                from backend.services import intent_answers
+                # Menu rows resolve via the profile button's intent field;
+                # registry buttons carry the intent name as their id directly.
+                panel_answer = (intent_answers.answer_for_button(wa_id, pressed_id, tenant_id)
+                                or intent_answers.answer_for_intent(wa_id, pressed_id, tenant_id))
+                if panel_answer:
+                    if config.SEND2_USERNAME and config.SEND2_PASSWORD:
+                        send_whatsapp_message(wa_id, panel_answer)
+                    save_chat(wa_id, sender_name, user_text, panel_answer, "intent")
+                    await log_outgoing_message(wa_id, panel_answer, "text")
+                    logger.info(f"PANEL_REPLY | {wa_id} | button={pressed_id}")
+                    response_time_ms = int((time.time() - start_time) * 1000)
+                    log_webhook("outgoing", "/webhook/panel", json.dumps({
+                        "to": wa_id, "button_id": pressed_id
+                    }), 200, f"Panel {pressed_id} answered",
+                        response_time_ms=response_time_ms)
+                    return
+            except Exception as e:
+                logger.error(f"Panel answer failed for button {pressed_id}: {e}")
 
         # ── ROUTE REGISTRY BUTTON PRESSES BY ID ─────────────────────────
         # Buttons generated from the button registry carry a machine id that

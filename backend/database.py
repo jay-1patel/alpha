@@ -80,190 +80,8 @@ def get_db_context():
 
 # ── Schema ───────────────────────────────────────────────────────────────
 
-def _table_exists(conn, table: str) -> bool:
-    row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-    ).fetchone()
-    return row is not None
-
-def _table_exists(conn, table: str) -> bool:
-    row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-    ).fetchone()
-    return row is not None
-
-def _table_pk_is_composite(conn, table: str, columns: list) -> bool:
-    pk_cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall() if r[5]]
-    return pk_cols == columns
-
-def _migrate_user_tables_to_composite_keys(conn):
-    """Rebuild user_sessions / user_states / carts to (tenant_id, wa_id) keys.
-
-    Legacy schemas keyed these tables on wa_id alone, so the same customer
-    messaging two tenants shared one state/cart row. Existing rows are stamped
-    with their tenant_id (default tenant when unknown) and copied into the new
-    shape. Runs once; afterwards the fresh DDL keeps the new shape.
-    """
-    try:
-        from shared.tenancy.resolver import resolve_default_tenant
-        default_tenant = resolve_default_tenant()
-    except Exception:
-        default_tenant = os.environ.get("DEFAULT_TENANT_ID", "default")
-
-    if not _table_exists(conn, "user_sessions"):
-        pass
-    elif not _table_pk_is_composite(conn, "user_sessions", ["tenant_id", "wa_id"]):
-        conn.execute(
-            """CREATE TABLE user_sessions_new (
-                tenant_id TEXT NOT NULL DEFAULT 'default',
-                wa_id TEXT NOT NULL,
-                last_inbound_at TIMESTAMP,
-                last_outbound_at TIMESTAMP,
-                session_open INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (tenant_id, wa_id)
-            )"""
-        )
-        conn.execute(
-            """INSERT OR IGNORE INTO user_sessions_new
-               (tenant_id, wa_id, last_inbound_at, last_outbound_at, session_open, created_at)
-               SELECT COALESCE(NULLIF(TRIM(us.tenant_id), ''), ?), s.wa_id,
-                      s.last_inbound_at, s.last_outbound_at, s.session_open, s.created_at
-               FROM user_sessions s
-               LEFT JOIN user_states us ON us.wa_id = s.wa_id""",
-            (default_tenant,),
-        )
-        conn.execute("DROP TABLE user_sessions")
-        conn.execute("ALTER TABLE user_sessions_new RENAME TO user_sessions")
-        logger.info("user_sessions: rebuilt with (tenant_id, wa_id) primary key")
-
-    if not _table_exists(conn, "user_states"):
-        pass
-    elif not _table_pk_is_composite(conn, "user_states", ["tenant_id", "wa_id"]):
-        old_cols = [r[1] for r in conn.execute("PRAGMA table_info(user_states)").fetchall()]
-        carry = [c for c in ("human_handover", "handover_resolved_at",
-                             "active_flow", "current_step", "collected", "status")
-                 if c in old_cols]
-        col_defs = {
-            "human_handover": "INTEGER DEFAULT 0",
-            "handover_resolved_at": "TIMESTAMP",
-            "active_flow": "TEXT",
-            "current_step": "TEXT",
-            "collected": "TEXT DEFAULT '{}'",
-            "status": "TEXT DEFAULT 'bot'",
-        }
-        extras_ddl = "".join(",\n                " + c + " " + col_defs[c] for c in carry)
-        extras_names = (", " + ", ".join(carry)) if carry else ""
-        conn.execute(
-            "CREATE TABLE user_states_new (\n"
-            "                tenant_id TEXT NOT NULL DEFAULT 'default',\n"
-            "                wa_id TEXT NOT NULL,\n"
-            "                state TEXT DEFAULT 'MAIN_MENU',\n"
-            "                context_json TEXT DEFAULT '{}',\n"
-            "                lang TEXT DEFAULT 'en',\n"
-            "                version INTEGER DEFAULT 0,\n"
-            "                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP" + extras_ddl + ",\n"
-            "                PRIMARY KEY (tenant_id, wa_id)\n"
-            "            )"
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO user_states_new\n"
-            "               (tenant_id, wa_id, state, context_json, lang, version, updated_at" + extras_names + ")\n"
-            "               SELECT COALESCE(NULLIF(TRIM(tenant_id), ''), ?), wa_id, state, context_json,\n"
-            "                      lang, version, updated_at" + extras_names + "\n"
-            "               FROM user_states",
-            (default_tenant,),
-        )
-        conn.execute("DROP TABLE user_states")
-        conn.execute("ALTER TABLE user_states_new RENAME TO user_states")
-        logger.info("user_states: rebuilt with (tenant_id, wa_id) primary key")
-
-    if not _table_exists(conn, "carts"):
-        pass
-    elif "tenant_id" not in {r[1] for r in conn.execute("PRAGMA table_info(carts)").fetchall()}:
-        cart_cols = {r[1] for r in conn.execute("PRAGMA table_info(carts)").fetchall()}
-        status_ddl = ", status TEXT DEFAULT 'active'" if "status" in cart_cols else ""
-        status_sel = ", status" if "status" in cart_cols else ""
-        conn.execute(
-            "CREATE TABLE carts_new (\n"
-            "                id INTEGER PRIMARY KEY AUTOINCREMENT,\n"
-            "                tenant_id TEXT NOT NULL DEFAULT 'default',\n"
-            "                wa_id TEXT NOT NULL,\n"
-            "                created_at TEXT NOT NULL DEFAULT (datetime('utc')),\n"
-            "                updated_at TEXT NOT NULL DEFAULT (datetime('utc')),\n"
-            "                expires_at TEXT NOT NULL" + status_ddl + "\n"
-            "            )"
-        )
-        conn.execute(
-            "INSERT INTO carts_new\n"
-            "               (tenant_id, wa_id, created_at, updated_at, expires_at" + status_sel + ")\n"
-            "               SELECT COALESCE(NULLIF(TRIM(us.tenant_id), ''), ?), c.wa_id,\n"
-            "                      c.created_at, c.updated_at, c.expires_at" + status_sel + "\n"
-            "               FROM carts c\n"
-            "               LEFT JOIN user_states us ON us.wa_id = c.wa_id",
-            (default_tenant,),
-        )
-        conn.execute("DROP TABLE carts")
-        conn.execute("ALTER TABLE carts_new RENAME TO carts")
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_carts_expires ON carts(expires_at)")
-        logger.info("carts: rebuilt with (tenant_id, wa_id) key")
-
-    if _table_exists(conn, "carts"):
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_carts_tenant_wa ON carts(tenant_id, wa_id)"
-        )
-    if _table_exists(conn, "products"):
-        slug_is_global = False
-        for idx in conn.execute("PRAGMA index_list(products)").fetchall():
-            if not idx["unique"]:
-                continue
-            idx_cols = [c["name"] for c in conn.execute(
-                f'PRAGMA index_info("{idx["name"]}")'
-            ).fetchall()]
-            if idx_cols == ["slug"]:
-                slug_is_global = True
-                break
-        has_tenant = "tenant_id" in {r[1] for r in conn.execute("PRAGMA table_info(products)").fetchall()}
-        if slug_is_global or not has_tenant:
-            if not has_tenant:
-                conn.execute("ALTER TABLE products ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'")
-            conn.execute(
-                "UPDATE products SET tenant_id = ? WHERE tenant_id IS NULL OR TRIM(tenant_id) = ''",
-                (default_tenant,),
-            )
-            conn.execute(
-                "DELETE FROM products WHERE id NOT IN (\n"
-                "                   SELECT MIN(id) FROM products GROUP BY tenant_id, slug\n"
-                "               )"
-            )
-            info = conn.execute("PRAGMA table_info(products)").fetchall()
-            col_defs = []
-            for r in info:
-                name, ctype = r[1], (r[2] or "TEXT")
-                if name == "id":
-                    col_defs.append("id INTEGER PRIMARY KEY AUTOINCREMENT")
-                elif name == "slug":
-                    col_defs.append("slug TEXT NOT NULL")
-                elif name == "tenant_id":
-                    col_defs.append("tenant_id TEXT NOT NULL DEFAULT 'default'")
-                else:
-                    col_defs.append(f'"{name}" {ctype}')
-            conn.execute("CREATE TABLE products_new (" + ", ".join(col_defs) + ")")
-            names = ", ".join('"' + r[1] + '"' for r in info)
-            conn.execute(f"INSERT INTO products_new SELECT {names} FROM products")
-            conn.execute("DROP TABLE products")
-            conn.execute("ALTER TABLE products_new RENAME TO products")
-            logger.info("products: rebuilt so slug uniqueness is (tenant_id, slug)")
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_products_tenant_slug\n"
-            "               ON products(tenant_id, slug)"
-        )
-
 def init_db():
     with get_db_context() as conn:
-        conn.execute("PRAGMA foreign_keys=OFF")
-        _migrate_user_tables_to_composite_keys(conn)
-        conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
 
@@ -372,20 +190,18 @@ def init_db():
         )
         conn.execute(
             """CREATE TABLE IF NOT EXISTS user_sessions (
-                tenant_id TEXT NOT NULL DEFAULT 'default',
-                wa_id TEXT NOT NULL,
+                wa_id TEXT PRIMARY KEY,
                 last_inbound_at TIMESTAMP,
                 last_outbound_at TIMESTAMP,
                 session_open INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (tenant_id, wa_id)
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )"""
         )
         conn.execute(
             """CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                slug TEXT NOT NULL,
+                slug TEXT UNIQUE NOT NULL,
                 category TEXT DEFAULT 'general',
                 description TEXT,
                 short_description TEXT,
@@ -410,14 +226,13 @@ def init_db():
         ])
         conn.execute(
             """CREATE TABLE IF NOT EXISTS user_states (
-                tenant_id TEXT NOT NULL DEFAULT 'default',
-                wa_id TEXT NOT NULL,
+                wa_id TEXT PRIMARY KEY,
                 state TEXT DEFAULT 'MAIN_MENU',
                 context_json TEXT DEFAULT '{}',
                 lang TEXT DEFAULT 'en',
                 version INTEGER DEFAULT 0,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (tenant_id, wa_id)
+                FOREIGN KEY (wa_id) REFERENCES user_sessions(wa_id) ON DELETE CASCADE
             )"""
         )
         _ensure_columns(conn, "user_states", [("version", "INTEGER DEFAULT 0")])
@@ -453,6 +268,7 @@ def init_db():
                 role TEXT DEFAULT 'sub_admin',
                 permissions TEXT DEFAULT '{}',
                 recovery_key TEXT,
+                tenant_id TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )"""
@@ -745,6 +561,7 @@ def init_db():
         # _init_embedding_tenancy). Uploads also record which brand they belong to
         # so a tenant console only lists its own files; the internal admin chat is
         # per-tenant too.
+        _ensure_columns(conn, "admins", [("tenant_id", "TEXT")])
         _ensure_columns(conn, "admin_files", [("tenant_id", "TEXT")])
         _ensure_columns(conn, "admin_chat_messages", [("tenant_id", "TEXT")])
         conn.execute(
@@ -828,8 +645,7 @@ def init_db():
         conn.execute(
             """CREATE TABLE IF NOT EXISTS carts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id TEXT NOT NULL DEFAULT 'default',
-                wa_id TEXT NOT NULL,
+                wa_id TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL DEFAULT (datetime('utc')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('utc')),
                 expires_at TEXT NOT NULL
@@ -880,7 +696,6 @@ def init_db():
         conn.execute(
             """CREATE TABLE IF NOT EXISTS checkout_sessions (
                 id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL DEFAULT 'default',
                 wa_id TEXT NOT NULL,
                 cart_snapshot_json TEXT NOT NULL,
                 order_draft_json TEXT NOT NULL DEFAULT '{}',
@@ -892,8 +707,7 @@ def init_db():
                 confirmed_order_number TEXT
             )"""
         )
-        _ensure_columns(conn, "checkout_sessions", [("tenant_id", "TEXT NOT NULL DEFAULT 'default'")])
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_checkout_wa ON checkout_sessions(tenant_id, wa_id, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_checkout_wa ON checkout_sessions(wa_id, status)")
         _ensure_columns(conn, "checkout_sessions", [("state", "TEXT DEFAULT 'name'")])
 
         # ── Orders: idempotency + per-user history index (Phase 2) ──────────
@@ -910,7 +724,6 @@ def init_db():
 
         _init_tenancy_tables(conn)
         _init_offerings_migration(conn)
-        _init_integration_tables(conn)
         _init_record_columns_table(conn)
         _init_conversation_state_columns(conn)
 
@@ -1059,110 +872,6 @@ def _init_tenancy_tables(conn):
 
 
 # ── Phase 3: data-defined flows write leads and handoffs ─────────────────
-
-def _init_integration_tables(conn):
-    """Delivery/payment integration requests submitted from the chatbot.
-
-    A user's onboarding answers land here as `pending`; a super admin approves
-    or rejects them. Approval copies the config into the tenant's published
-    profile (integrations block) so checkout/orders can use it immediately.
-    """
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS integration_requests (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id           TEXT NOT NULL,
-            wa_id               TEXT NOT NULL,
-            delivery_provider   TEXT DEFAULT '',
-            delivery_config_json TEXT DEFAULT '{}',
-            payment_provider    TEXT DEFAULT '',
-            payment_config_json TEXT DEFAULT '{}',
-            status              TEXT NOT NULL DEFAULT 'pending'
-                                CHECK (status IN ('pending','approved','rejected')),
-            review_note         TEXT DEFAULT '',
-            reviewed_by         TEXT DEFAULT '',
-            reviewed_at         TIMESTAMP,
-            created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )"""
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS ix_integration_requests_tenant_status "
-        "ON integration_requests(tenant_id, status, created_at)"
-    )
-
-
-def save_integration_request(tenant_id: str, wa_id: str,
-                             delivery_provider: str, delivery_config: dict,
-                             payment_provider: str, payment_config: dict) -> int:
-    """Store a chatbot onboarding submission as a pending request."""
-    with get_db_context() as conn:
-        cur = conn.execute(
-            """INSERT INTO integration_requests
-               (tenant_id, wa_id, delivery_provider, delivery_config_json,
-                payment_provider, payment_config_json, status)
-               VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
-            (tenant_id, wa_id,
-             str(delivery_provider or ""), json.dumps(delivery_config or {}),
-             str(payment_provider or ""), json.dumps(payment_config or {})),
-        )
-        req_id = cur.lastrowid
-    logger.info("INTEGRATION_REQUEST | tenant=%s | wa=%s | id=%s | delivery=%s | payment=%s",
-                tenant_id, wa_id, req_id, delivery_provider, payment_provider)
-    return req_id
-
-
-def list_integration_requests(status: str = None, tenant_id: str = None) -> list:
-    """Integration requests, newest first, optionally filtered."""
-    sql = "SELECT * FROM integration_requests"
-    clauses, params = [], []
-    if status:
-        clauses.append("status = ?")
-        params.append(status)
-    if tenant_id:
-        clauses.append("tenant_id = ?")
-        params.append(tenant_id)
-    if clauses:
-        sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY created_at DESC"
-    with get_db_context() as conn:
-        rows = conn.execute(sql, params).fetchall()
-    out = []
-    for r in rows:
-        d = dict(r)
-        try:
-            d["delivery_config"] = json.loads(d.pop("delivery_config_json") or "{}")
-        except (json.JSONDecodeError, TypeError):
-            d["delivery_config"] = {}
-        try:
-            d["payment_config"] = json.loads(d.pop("payment_config_json") or "{}")
-        except (json.JSONDecodeError, TypeError):
-            d["payment_config"] = {}
-        out.append(d)
-    return out
-
-
-def get_integration_request(req_id: int) -> dict | None:
-    rows = list_integration_requests()
-    for r in rows:
-        if r.get("id") == req_id:
-            return r
-    return None
-
-
-def update_integration_request_status(req_id: int, status: str,
-                                      reviewed_by: str = "",
-                                      review_note: str = "") -> bool:
-    if status not in ("approved", "rejected", "pending"):
-        return False
-    with get_db_context() as conn:
-        cur = conn.execute(
-            """UPDATE integration_requests
-               SET status = ?, reviewed_by = ?, review_note = ?,
-                   reviewed_at = CURRENT_TIMESTAMP
-               WHERE id = ? AND status = 'pending'""",
-            (status, reviewed_by, review_note, req_id),
-        )
-        return cur.rowcount > 0
-
 
 def _init_lead_tables(conn):
     """Leads and handoffs, both written by the profile-driven flow runner.
@@ -1769,34 +1478,34 @@ def delete_knowledge_base_file(source_file, tenant_id=None):
 
 # ── Session management (24-hour WhatsApp session window) ─────────────────
 
-def update_session_inbound(wa_id: str, tenant_id: str = None):
-    tid = _user_tenant(tenant_id)
+def update_session_inbound(wa_id: str):
     with get_db_context() as conn:
         conn.execute(
-            """INSERT INTO user_sessions (tenant_id, wa_id, last_inbound_at, session_open)
-               VALUES (?, ?, CURRENT_TIMESTAMP, 1)
-               ON CONFLICT(tenant_id, wa_id) DO UPDATE SET
+            """INSERT INTO user_sessions (wa_id, last_inbound_at, session_open)
+               VALUES (?, CURRENT_TIMESTAMP, 1)
+               ON CONFLICT(wa_id) DO UPDATE SET
                  last_inbound_at = CURRENT_TIMESTAMP,
                  session_open = 1""",
-            (tid, wa_id),
+            (wa_id,),
         )
 
-def update_session_outbound(wa_id: str, tenant_id: str = None):
-    tid = _user_tenant(tenant_id)
+
+def update_session_outbound(wa_id: str):
     with get_db_context() as conn:
         conn.execute(
-            """INSERT INTO user_sessions (tenant_id, wa_id, last_outbound_at)
-               VALUES (?, ?, CURRENT_TIMESTAMP)
-               ON CONFLICT(tenant_id, wa_id) DO UPDATE SET
+            """INSERT INTO user_sessions (wa_id, last_outbound_at)
+               VALUES (?, CURRENT_TIMESTAMP)
+               ON CONFLICT(wa_id) DO UPDATE SET
                  last_outbound_at = CURRENT_TIMESTAMP""",
-            (tid, wa_id),
+            (wa_id,),
         )
 
-def is_session_open(wa_id: str, window_hours: int = 24, tenant_id: str = None) -> bool:
+
+def is_session_open(wa_id: str, window_hours: int = 24) -> bool:
     with get_db_context() as conn:
         row = conn.execute(
-            "SELECT last_inbound_at FROM user_sessions WHERE tenant_id = ? AND wa_id = ?",
-            (_user_tenant(tenant_id), wa_id),
+            "SELECT last_inbound_at FROM user_sessions WHERE wa_id = ?",
+            (wa_id,),
         ).fetchone()
     if not row or not row["last_inbound_at"]:
         return False
@@ -1808,11 +1517,11 @@ def is_session_open(wa_id: str, window_hours: int = 24, tenant_id: str = None) -
         return False
 
 
-def get_session_info(wa_id: str, tenant_id: str = None) -> dict:
+def get_session_info(wa_id: str) -> dict:
     with get_db_context() as conn:
         row = conn.execute(
-            "SELECT * FROM user_sessions WHERE tenant_id = ? AND wa_id = ?",
-            (_user_tenant(tenant_id), wa_id),
+            "SELECT * FROM user_sessions WHERE wa_id = ?",
+            (wa_id,),
         ).fetchone()
     return dict(row) if row else {}
 
@@ -1831,20 +1540,6 @@ def _resolve_tenant(tenant_id: str = None) -> str:
         return resolve_default_tenant()
     except Exception:
         return os.environ.get("DEFAULT_TENANT_ID", "default")
-
-def _user_tenant(tenant_id: str = None) -> str:
-    """Tenant that owns a (tenant_id, wa_id) user row.
-
-    Resolution order: explicit argument, the request-scoped contextvar set by
-    the webhook, then the default tenant. Never "all tenants".
-    """
-    explicit = str(tenant_id or "").strip()
-    if explicit:
-        return explicit
-    req = get_request_tenant()
-    if req:
-        return req
-    return _resolve_tenant()
 
 
 def save_product(name: str, slug: str, category: str = "general",
@@ -2095,11 +1790,11 @@ def build_products_snapshot(category: str = None, active_only: bool = True,
                           tenant_id=tenant_id)
     return {"items": items, "count": len(items), "generated_at": datetime.now().isoformat()}
 
-def get_user_state(wa_id: str, tenant_id: str = None) -> dict:
+def get_user_state(wa_id: str) -> dict:
     with get_db_context() as conn:
         row = conn.execute(
-            "SELECT * FROM user_states WHERE tenant_id = ? AND wa_id = ?",
-            (_user_tenant(tenant_id), wa_id),
+            "SELECT * FROM user_states WHERE wa_id = ?",
+            (wa_id,),
         ).fetchone()
     if row:
         result = dict(row)
@@ -2111,66 +1806,44 @@ def get_user_state(wa_id: str, tenant_id: str = None) -> dict:
     return {"wa_id": wa_id, "state": "MAIN_MENU", "context_json": {}, "lang": "en"}
 
 
-def set_user_state(wa_id: str, state: str, context: dict = None, lang: str = None, tenant_id: str = None) -> bool:
-    tid = _user_tenant(tenant_id)
+def set_user_state(wa_id: str, state: str, context: dict = None, lang: str = None) -> bool:
     with get_db_context() as conn:
         context_json = json.dumps(context or {})
         if lang:
             conn.execute(
-                """INSERT INTO user_states (tenant_id, wa_id, state, context_json, lang)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(tenant_id, wa_id) DO UPDATE SET
-                     state = excluded.state,
-                     context_json = excluded.context_json,
-                     lang = excluded.lang,
+                """INSERT INTO user_states (wa_id, state, context_json, lang)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(wa_id) DO UPDATE SET
+                     state = ?,
+                     context_json = ?,
+                     lang = ?,
                      updated_at = CURRENT_TIMESTAMP""",
-                (tid, wa_id, state, context_json, lang),
+                (wa_id, state, context_json, lang, state, context_json, lang),
             )
         else:
             conn.execute(
-                """INSERT INTO user_states (tenant_id, wa_id, state, context_json)
-                   VALUES (?, ?, ?, ?)
-                   ON CONFLICT(tenant_id, wa_id) DO UPDATE SET
-                     state = excluded.state,
-                     context_json = excluded.context_json,
+                """INSERT INTO user_states (wa_id, state, context_json)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(wa_id) DO UPDATE SET
+                     state = ?,
+                     context_json = ?,
                      updated_at = CURRENT_TIMESTAMP""",
-                (tid, wa_id, state, context_json),
+                (wa_id, state, context_json, state, context_json),
             )
     return True
 
 
-def update_user_context(wa_id: str, context: dict, tenant_id: str = None) -> bool:
-    current = get_user_state(wa_id, tenant_id)
+def update_user_context(wa_id: str, context: dict) -> bool:
+    current = get_user_state(wa_id)
     merged = {**current.get("context_json", {}), **context}
-    return set_user_state(wa_id, current.get("state", "MAIN_MENU"), merged, tenant_id=tenant_id)
+    return set_user_state(wa_id, current.get("state", "MAIN_MENU"), merged)
 
 
-def clear_user_context(wa_id: str, tenant_id: str = None) -> bool:
-    return set_user_state(wa_id, "MAIN_MENU", {}, tenant_id=tenant_id)
+def clear_user_context(wa_id: str) -> bool:
+    return set_user_state(wa_id, "MAIN_MENU", {})
 
 
-def _handover_tenant(wa_id: str, tenant_id: str = None) -> str:
-    """Tenant for an admin handover action on a wa_id.
-
-    Admin inbox routes address conversations by wa_id alone, so when no tenant
-    is given we use the tenant already stamped on the user's state row.
-    """
-    explicit = str(tenant_id or "").strip()
-    if explicit:
-        return explicit
-    req = get_request_tenant()
-    if req:
-        return req
-    with get_db_context() as conn:
-        row = conn.execute(
-            "SELECT tenant_id FROM user_states WHERE wa_id = ? ORDER BY updated_at DESC LIMIT 1",
-            (wa_id,),
-        ).fetchone()
-    if row and (row["tenant_id"] or "").strip():
-        return row["tenant_id"].strip()
-    return _resolve_tenant()
-
-def set_human_handover(wa_id: str, active: bool, tenant_id: str = None) -> bool:
+def set_human_handover(wa_id: str, active: bool) -> bool:
     """Set or clear the human-handover state for a conversation.
 
     When ``active`` is True the conversation enters the live human inbox and any
@@ -2183,26 +1856,26 @@ def set_human_handover(wa_id: str, active: bool, tenant_id: str = None) -> bool:
             if active:
                 conn.execute(
                     """
-                    INSERT INTO user_states (tenant_id, wa_id, human_handover, updated_at, handover_resolved_at)
-                    VALUES (?, ?, 1, CURRENT_TIMESTAMP, NULL)
-                    ON CONFLICT(tenant_id, wa_id) DO UPDATE SET
+                    INSERT INTO user_states (wa_id, human_handover, updated_at, handover_resolved_at)
+                    VALUES (?, 1, CURRENT_TIMESTAMP, NULL)
+                    ON CONFLICT(wa_id) DO UPDATE SET
                         human_handover = 1,
                         updated_at = CURRENT_TIMESTAMP,
                         handover_resolved_at = NULL
                     """,
-                    (_handover_tenant(wa_id, tenant_id), wa_id),
+                    (wa_id,),
                 )
             else:
                 conn.execute(
                     """
-                    INSERT INTO user_states (tenant_id, wa_id, human_handover, updated_at, handover_resolved_at)
-                    VALUES (?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    ON CONFLICT(tenant_id, wa_id) DO UPDATE SET
+                    INSERT INTO user_states (wa_id, human_handover, updated_at, handover_resolved_at)
+                    VALUES (?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT(wa_id) DO UPDATE SET
                         human_handover = 0,
                         updated_at = CURRENT_TIMESTAMP,
                         handover_resolved_at = CURRENT_TIMESTAMP
                     """,
-                    (_handover_tenant(wa_id, tenant_id), wa_id),
+                    (wa_id,),
                 )
         return True
     except Exception as e:
@@ -2476,17 +2149,19 @@ def get_button_click_stats(button_id: str = None, wa_id: str = None) -> dict:
 
 # ── Search helpers ───────────────────────────────────────────────────────
 
-def search_faq_db(query: str, limit: int = 5) -> list:
+def search_faq_db(query: str, limit: int = 5, tenant_id: str = None) -> list:
     import re as _re
     words = [w for w in _re.findall(r"[a-zA-Z]{2,}", query.lower())]
     if not words:
         return []
+    tenant_clause = " AND tenant_id = ?" if tenant_id else ""
+    tenant_params = [tenant_id] if tenant_id else []
     with get_db_context() as conn:
         rows = conn.execute(
-            """SELECT * FROM faq_dataset
-               WHERE content LIKE ?
+            f"""SELECT * FROM faq_dataset
+               WHERE content LIKE ?{tenant_clause}
                ORDER BY id DESC LIMIT ?""",
-            (f"%{query}%", limit),
+            ([f"%{query}%"] + tenant_params + [limit]),
         ).fetchall()
         if rows:
             return [_row_to_dict(r) for r in rows]
@@ -2494,6 +2169,8 @@ def search_faq_db(query: str, limit: int = 5) -> list:
         scored = []
         for r in all_rows:
             d = _row_to_dict(r)
+            if tenant_id and (d.get("tenant_id") or "") != tenant_id:
+                continue
             searchable = " ".join([
                 (d.get("source_file") or "").lower(),
                 (d.get("content") or "").lower(),
@@ -2505,17 +2182,19 @@ def search_faq_db(query: str, limit: int = 5) -> list:
         return [d for _, d in scored[:limit]]
 
 
-def search_knowledge_base_db(query: str, limit: int = 5) -> list:
+def search_knowledge_base_db(query: str, limit: int = 5, tenant_id: str = None) -> list:
     import re as _re
     words = [w for w in _re.findall(r"[a-zA-Z]{2,}", query.lower())]
     if not words:
         return []
+    tenant_clause = " AND tenant_id = ?" if tenant_id else ""
+    tenant_params = [tenant_id] if tenant_id else []
     with get_db_context() as conn:
         rows = conn.execute(
-            """SELECT * FROM knowledge_base
-               WHERE title LIKE ? OR content LIKE ? OR tags LIKE ?
+            f"""SELECT * FROM knowledge_base
+               WHERE (title LIKE ? OR content LIKE ? OR tags LIKE ?){tenant_clause}
                ORDER BY id DESC LIMIT ?""",
-            (f"%{query}%", f"%{query}%", f"%{query}%", limit),
+            ([f"%{query}%", f"%{query}%", f"%{query}%"] + tenant_params + [limit]),
         ).fetchall()
         if rows:
             return [_row_to_dict(r) for r in rows]
@@ -2523,6 +2202,8 @@ def search_knowledge_base_db(query: str, limit: int = 5) -> list:
         scored = []
         for r in all_rows:
             d = _row_to_dict(r)
+            if tenant_id and (d.get("tenant_id") or "") != tenant_id:
+                continue
             searchable = " ".join([
                 (d.get("title") or "").lower(),
                 (d.get("content") or "").lower(),
@@ -2544,13 +2225,13 @@ def count_admins() -> int:
 
 
 def create_admin(username: str, password_hash: str, salt: str = "", role: str = "sub_admin",
-                 permissions: dict = None, recovery_key: str = None) -> int:
+                 permissions: dict = None, recovery_key: str = None, tenant_id: str = None) -> int:
     with get_db_context() as conn:
         cur = conn.execute(
-            """INSERT INTO admins (username, password_hash, salt, role, permissions, recovery_key)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO admins (username, password_hash, salt, role, permissions, recovery_key, tenant_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (username, password_hash, salt, role,
-             json.dumps(permissions or {}), recovery_key),
+             json.dumps(permissions or {}), recovery_key, tenant_id),
         )
         return cur.lastrowid
 
@@ -2633,12 +2314,14 @@ def list_admin_records() -> list:
     return result
 
 
-def update_admin_record(username: str, role: str = None, permissions: dict = None) -> bool:
+def update_admin_record(username: str, role: str = None, permissions: dict = None, tenant_id: str = None) -> bool:
     updates = {}
     if role is not None:
         updates["role"] = role
     if permissions is not None:
         updates["permissions"] = json.dumps(permissions)
+    if tenant_id is not None:
+        updates["tenant_id"] = tenant_id
     if not updates:
         return False
     set_clause = ", ".join(f"{k} = ?" for k in updates)

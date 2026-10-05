@@ -539,15 +539,8 @@ def coerce_record(columns: List[Dict[str, Any]], values: Dict[str, Any]) -> Dict
             clean[column["key"]] = coerce(column, values[column["key"]])
         except ColumnError as exc:
             errors[column["key"]] = str(exc)
-    # Required check — for the tenant's own columns only. System columns
-    # (name, category, …) arrive as top-level body fields, never inside
-    # `values`, so checking them here would reject every valid save.
     for column in columns:
-        if (
-            column["required"]
-            and not column.get("is_system")
-            and clean.get(column["key"]) in (None, "")
-        ):
+        if column["required"] and clean.get(column["key"]) in (None, ""):
             errors.setdefault(column["key"], f"‘{column['label']}’ is required.")
     return clean, errors
 

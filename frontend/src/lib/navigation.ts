@@ -53,10 +53,10 @@ export interface NavItem {
  * the panel behind each is listed in `PENDING_VIEWS` in App.tsx.
  */
 const IT_INFO_ITEMS: NavItem[] = [
-  { id: 'portfolio', label: 'Portfolio', icon: FolderOpen },
-  { id: 'technologies', label: 'Technologies', icon: Cpu },
-  { id: 'careers', label: 'Careers', icon: Briefcase },
-  { id: 'benefits', label: 'Benefits', icon: Gift },
+  { id: 'portfolio', label: 'Portfolio', icon: FolderOpen, permissions: ['manage_portfolio'] },
+  { id: 'technologies', label: 'Technologies', icon: Cpu, permissions: ['manage_technologies'] },
+  { id: 'careers', label: 'Careers', icon: Briefcase, permissions: ['manage_careers'] },
+  { id: 'benefits', label: 'Benefits', icon: Gift, permissions: ['manage_benefits'] },
 ]
 
 /**

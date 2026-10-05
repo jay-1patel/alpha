@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api, getActiveTenantId, setActiveTenantId } from './api'
+import { useAuth } from './auth'
 import type {
   Features,
   LayerDetail,
@@ -107,6 +108,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeId, setActiveId] = useState<string | null>(getActiveTenantId())
+  const { identity } = useAuth()
 
   const reload = useCallback(() => {
     let cancelled = false
@@ -115,11 +117,20 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       .list()
       .then((rows) => {
         if (cancelled) return
-        setTenants(rows)
+        // Tenant-scoped admins and sub admins only ever see their own tenant —
+        // never the full registry, whatever localStorage still holds.
+        const scopedTenantId =
+          identity && identity.role !== 'super_admin' && identity.tenant_id ? identity.tenant_id : null
+        const filtered = scopedTenantId ? rows.filter((t) => t.id === scopedTenantId) : rows
+        setTenants(filtered)
         setError(null)
         setActiveId((current) => {
-          if (current && rows.some((t) => t.id === current)) return current
-          const next = rows[0]?.id ?? null
+          if (scopedTenantId) {
+            setActiveTenantId(scopedTenantId)
+            return scopedTenantId
+          }
+          if (current && filtered.some((t) => t.id === current)) return current
+          const next = filtered[0]?.id ?? null
           setActiveTenantId(next)
           return next
         })
@@ -133,7 +144,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [identity])
 
   useEffect(() => reload(), [reload])
 

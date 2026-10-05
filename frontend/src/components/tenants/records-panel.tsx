@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useAction, useAsync } from '@/lib/hooks'
 import { useAuth } from '@/lib/auth'
+import { contentWritePerms } from '@/lib/permissions'
 import { offeringsApi } from '@/lib/offerings'
 import { useTenants } from '@/lib/tenants'
 import { getVertical } from '@/lib/verticals'
@@ -82,7 +83,12 @@ export function RecordsPanel({ tenantId }: { tenantId: string }) {
 
   const content = getVertical(active?.vertical).content
   const canRead = can('view_products')
-  const canEdit = can('edit_delete_products')
+  // Add/edit/remove are granted separately per vertical — see contentWritePerms.
+  const { add: addPerms, edit: editPerms, remove: removePerms } = contentWritePerms(active?.vertical)
+  const canAdd = addPerms.some(can)
+  const canEditRow = editPerms.some(can)
+  const canRemove = removePerms.some(can)
+  const canEdit = canAdd || canEditRow || canRemove
   const canSchema = can('manage_operations')
 
   const [showInactive, setShowInactive] = useState(false)
@@ -171,7 +177,7 @@ export function RecordsPanel({ tenantId }: { tenantId: string }) {
                 Add column
               </Button>
             )}
-            {canEdit && (
+            {canAdd && (
               <Button
                 variant="primary"
                 icon={<Plus className="h-4 w-4" />}
@@ -370,17 +376,19 @@ export function RecordsPanel({ tenantId }: { tenantId: string }) {
                       </td>
                     ))}
                     <td className="px-4 py-3">
-                      {canEdit && (
+                      {(canEditRow || canRemove) && (
                         <div className="flex shrink-0 items-center justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            icon={<Pencil className="h-3.5 w-3.5" />}
-                            onClick={() => setEditing(row)}
-                          >
-                            Edit
-                          </Button>
-                          {row.is_active &&
+                          {canEditRow && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              icon={<Pencil className="h-3.5 w-3.5" />}
+                              onClick={() => setEditing(row)}
+                            >
+                              Edit
+                            </Button>
+                          )}
+                          {canRemove && row.is_active &&
                             (confirmDelete === row.id ? (
                               <>
                                 <Button
@@ -405,7 +413,7 @@ export function RecordsPanel({ tenantId }: { tenantId: string }) {
                                 Remove
                               </Button>
                             ))}
-                          {!row.is_active && (
+                          {canEditRow && !row.is_active && (
                             <Button
                               size="sm"
                               variant="ghost"

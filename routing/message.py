@@ -421,7 +421,7 @@ def get_greeting_response(text: str) -> str:
 async def forward_to_bot(query_type, user_text, wa_id=None, raw_message=None):
     if query_type == "faq":
         from backend.faq.service import handle_faq_query
-        data = await handle_faq_query({"message": user_text})
+        data = await handle_faq_query({"message": user_text, "wa_id": wa_id})
     else:
         from kb.service import handle_kb_query
         data = await handle_kb_query(
@@ -527,6 +527,22 @@ async def process_message(user_text: str, wa_id: str = None, raw_message: dict =
             result["whatsapp_sent"] = bool(sent)
             logger.info(f"CATALOG_PDF_SENT | {wa_id} | sent={sent}")
             return result
+
+    # ── PROFILE-DEFINED INFORMATIONAL INTENTS ─────────────────────────────
+    # A typed query that clearly names an answered panel (technologies,
+    # portfolio, careers, benefits...) replies from the tenant's own profile
+    # text — no LLM and no corpus needed. Falls through untouched when the
+    # tenant configured no answer for the matched intent.
+    try:
+        from backend.services import intent_answers
+        intent_reply = intent_answers.answer_for_text(wa_id, user_text)
+        if intent_reply:
+            result["answer"] = intent_reply
+            result["query_type"] = "intent"
+            logger.info(f"INTENT_REPLY | {wa_id} | matched informational intent")
+            return result
+    except Exception as e:
+        logger.debug(f"Intent answer lookup failed (continuing): {e}")
 
     if query_type == "greeting":
         # Show the main menu directly; no LLM greeting text is needed.

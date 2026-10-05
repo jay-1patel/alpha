@@ -33,23 +33,6 @@ def _intents(*specs: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [dict(s) for s in specs]
 
 
-_SETUP_INTEGRATIONS = {
-    "name": "setup_integrations",
-    "examples": [
-        "I want to set up delivery",
-        "connect my payment gateway",
-        "add my shiprocket account",
-        "setup payment and delivery api",
-    ],
-    "keywords": [
-        "delivery api", "payment api", "delivery setup", "payment setup",
-        "setup delivery", "setup payment", "connect delivery", "connect payment",
-        "delivery partner", "payment gateway", "shiprocket", "delhivery",
-        "bluedart", "razorpay", "phonepe", "paytm",
-    ],
-    "flow": "setup_delivery_payment",
-}
-
 _GREETING = {
     "name": "greeting",
     "examples": ["hi", "hello", "hey there", "good morning"],
@@ -184,7 +167,6 @@ _ECOMMERCE = {
     },
     "intents": _intents(
         _GREETING,
-        _SETUP_INTEGRATIONS,
         {"name": "catalogue_request", "examples": ["send me the brochure", "download the price list"],
          "keywords": ["catalogue", "catalog", "brochure", "price list"], "requires_feature": "brochure_pdf"},
         {"name": "new_arrivals", "examples": ["what is new", "latest releases"],
@@ -303,41 +285,58 @@ _IT_SOFTWARE = {
             {"id": "menu_services", "title": "Our Services", "description": "What we build and deliver",
              "section": "🛠️ Services", "icon": "🛠️", "sort_order": 0, "requires_feature": "offerings"},
             {"id": "menu_technologies", "title": "Technologies", "description": "Our tech stack & expertise",
-             "section": "🛠️ Services", "icon": "💻", "sort_order": 1, "requires_feature": "offering_details"},
+             "section": "🛠️ Services", "icon": "💻", "sort_order": 1, "requires_feature": "offering_details",
+             "intent": "technologies"},
             {"id": "menu_portfolio", "title": "Portfolio", "description": "Work we have delivered",
-             "section": "🏢 Company", "icon": "📁", "sort_order": 2},
+             "section": "🏢 Company", "icon": "📁", "sort_order": 2, "intent": "portfolio"},
             {"id": "menu_brochure", "title": "Service Brochure", "description": "Download our brochure",
              "section": "🏢 Company", "icon": "📄", "sort_order": 3, "requires_feature": "brochure_pdf"},
             {"id": "menu_careers", "title": "Careers", "description": "Open roles & hiring process",
-             "section": "🏢 Company", "icon": "💼", "sort_order": 4},
+             "section": "🏢 Company", "icon": "💼", "sort_order": 4, "intent": "careers"},
+            {"id": "menu_benefits", "title": "Benefits", "description": "Why work with us",
+             "section": "🏢 Company", "icon": "🎁", "sort_order": 5, "intent": "benefits"},
             {"id": "menu_quote", "title": "Get a Quote", "description": "Tell us about your project",
-             "section": "📞 Talk To Us", "icon": "📝", "sort_order": 5, "requires_feature": "quote",
+             "section": "📞 Talk To Us", "icon": "📝", "sort_order": 6, "requires_feature": "quote",
              "flow": "get_quote"},
             {"id": "menu_callback", "title": "Book a Callback", "description": "Have us call you back",
-             "section": "📞 Talk To Us", "icon": "📞", "sort_order": 6, "requires_feature": "callback",
+             "section": "📞 Talk To Us", "icon": "📞", "sort_order": 7, "requires_feature": "callback",
              "flow": "book_callback"},
             {"id": "menu_support", "title": "Support", "description": "Existing client support",
-             "section": "📞 Talk To Us", "icon": "🆘", "sort_order": 7, "flow": "raise_ticket"},
+             "section": "📞 Talk To Us", "icon": "🆘", "sort_order": 8, "flow": "raise_ticket"},
             {"id": "menu_human", "title": "Talk to Human", "description": "Chat with our team",
-             "section": "📞 Talk To Us", "icon": "🙋", "sort_order": 8, "flow": "book_callback"},
+             "section": "📞 Talk To Us", "icon": "🙋", "sort_order": 9, "flow": "book_callback"},
         ],
     },
     "intents": _intents(
         _GREETING,
-        _SETUP_INTEGRATIONS,
         {"name": "service_enquiry", "examples": ["what services do you offer", "do you build mobile apps"],
          "keywords": ["service", "services", "what do you do", "capability", "capabilities",
                       "offerings", "solution", "expertise"], "requires_feature": "offerings"},
+        {"name": "technologies", "examples": ["what technologies do you work with", "what is your tech stack"],
+         "keywords": ["technologies", "technology", "tech stack", "stack", "framework", "tools",
+                      "programming languages"],
+         "answer": ("• Here's the stack we build with:\n"
+                    "• *Frontend:* modern JavaScript frameworks and UI systems\n"
+                    "• *Backend:* Node.js, Python, PHP and .NET services\n"
+                    "• *Mobile:* cross-platform and native iOS / Android\n"
+                    "• *Cloud & DevOps:* AWS, Azure, Docker and CI/CD pipelines\n"
+                    "• *Databases:* SQL and NoSQL stores chosen per project\n"
+                    "• Tell us what you're building and we'll match the right stack for it.")},
         {"name": "package_details", "examples": ["tell me about website development", "what is in the mobile app package"],
-         "keywords": ["package", "tech stack", "technology", "technologies", "stack", "framework",
-                      "mobile app", "ecommerce website", "detail", "details"],
+         "keywords": ["package", "mobile app", "ecommerce website", "detail", "details"],
          "requires_feature": "offering_details"},
         _PRICING,
         {"name": "demo_request", "examples": ["can I see a demo", "book a demo call"],
          "keywords": ["demo", "demonstration", "walkthrough", "live demo", "sample", "trial"],
          "requires_feature": "book_appointment", "flow": "get_quote"},
         {"name": "portfolio", "examples": ["show me your work", "who have you built for"],
-         "keywords": ["portfolio", "your work", "case study", "case studies", "projects", "clients", "experience"]},
+         "keywords": ["portfolio", "your work", "case study", "case studies", "projects", "clients", "experience"],
+         "answer": ("• A snapshot of the work we deliver:\n"
+                    "• *Web platforms:* e-commerce, portals and internal systems\n"
+                    "• *Mobile apps:* customer and field-force apps on iOS and Android\n"
+                    "• *Enterprise:* CRM, ERP integrations and workflow automation\n"
+                    "• *Industries:* retail, healthcare, finance, logistics and education\n"
+                    "• We share client names and detailed case studies only with their permission — our team can walk you through relevant examples on a call.")},
         {"name": "engagement_model", "examples": ["how do you work with clients", "what are your engagement models"],
          "keywords": ["engagement model", "process", "workflow", "milestone", "retainer", "onboarding",
                       "how do you work", "methodology"]},
@@ -351,7 +350,22 @@ _IT_SOFTWARE = {
          "keywords": ["brochure", "company profile", "pdf", "capability statement"],
          "requires_feature": "brochure_pdf"},
         {"name": "careers", "examples": ["are you hiring", "job openings at your company"],
-         "keywords": ["career", "careers", "job", "hiring", "vacancy", "internship", "open role"]},
+         "keywords": ["career", "careers", "job", "hiring", "vacancy", "internship", "open role"],
+         "answer": ("• We're always glad to hear from good people:\n"
+                    "• *Roles we hire for:* frontend, backend and mobile developers, QA, DevOps and designers\n"
+                    "• *Internships:* available for final-year students and fresh graduates\n"
+                    "• *How to apply:* send your CV to our team with the role in the subject line\n"
+                    "• Shortlisted candidates hear from us within a few days.")},
+        {"name": "benefits", "examples": ["why should we work with you", "what are the benefits"],
+         "keywords": ["benefits", "why choose you", "why work with you", "advantages", "perks",
+                      "what makes you different"],
+         "answer": ("• Why teams choose to work with us:\n"
+                    "• *Dedicated point of contact* for every engagement\n"
+                    "• *Agile delivery* in short, transparent sprints\n"
+                    "• *Regular demos and reports* — you always know where things stand\n"
+                    "• *Post-launch support and maintenance* options\n"
+                    "• *Your IP stays yours* — code and assets are handed over\n"
+                    "• NDA and clear contracts on request.")},
         _COMPLAINT,
         _SUPPORT,
         _CONTACT_HUMAN,
@@ -464,7 +478,6 @@ _TOURS_TRAVEL = {
     },
     "intents": _intents(
         _GREETING,
-        _SETUP_INTEGRATIONS,
         {"name": "destination_details", "examples": ["tell me about Bali", "which places do you cover"],
          "keywords": ["destination", "destinations", "places", "city", "country", "where", "location",
                       "attraction", "attractions"], "requires_feature": "offerings"},
@@ -576,7 +589,6 @@ _BANKING = {
     },
     "intents": _intents(
         _GREETING,
-        _SETUP_INTEGRATIONS,
         # Operational intents come FIRST: on keyword ties, a lost card must
         # outrank a product question. Informational intents sit last.
         {"name": "service_request", "examples": ["how do I activate my card", "net banking is not working"],
@@ -692,7 +704,6 @@ _FINANCE = {
     },
     "intents": _intents(
         _GREETING,
-        _SETUP_INTEGRATIONS,
         # package_details before service_enquiry: "scope of your compliance
         # service" is a package question, and on the "service" keyword tie the
         # earlier intent wins.
@@ -806,7 +817,6 @@ _HEALTHCARE = {
     },
     "intents": _intents(
         _GREETING,
-        _SETUP_INTEGRATIONS,
         {"name": "service_enquiry", "examples": ["do you treat knee pain", "what is physiotherapy"],
          "keywords": ["treat", "treatment", "do you treat", "symptom", "condition", "speciality",
                       "physiotherapy", "consultation"], "requires_feature": "offerings"},
@@ -899,7 +909,6 @@ _GENERIC = {
     },
     "intents": _intents(
         _GREETING,
-        _SETUP_INTEGRATIONS,
         {"name": "service_enquiry", "examples": ["what do you offer", "tell me about your services"],
          "keywords": ["service", "services", "offer", "offerings", "what do you do"],
          "requires_feature": "offerings"},
@@ -1107,46 +1116,6 @@ DEFAULT_FLOWS: List[Dict[str, Any]] = [
             {"id": "handoff_to_cart", "type": "handoff", "handoff_reason": "cart_checkout",
              "store_context": True, "next": "done"},
             {"id": "done", "type": "say", "prompt": "Your order is confirmed!"},
-        ],
-    },
-    {
-        "name": "setup_delivery_payment",
-        "intent": "setup_integrations",
-        "description": "Onboard the client's delivery and payment APIs for super-admin approval.",
-        "start_message": "",
-        "success_message": "",
-        "steps": [
-            _say("intro", "Let's connect your delivery and payment services. "
-                 "Once done, our team verifies them and your store goes live with both."),
-            _ask("ask_name", "name", "First, may I know your name?",
-                 validate="name:2", invalid="Could you share your name (at least 2 characters)?"),
-            {"id": "ask_delivery_provider", "type": "choice", "key": "delivery_provider",
-             "prompt": "Which delivery service do you use?",
-             "options": ["Shiprocket", "Delhivery", "Blue Dart", "Self / own delivery fleet"],
-             "invalid_message": "Please pick one of the delivery services listed."},
-            _ask("ask_delivery_creds", "delivery_api_details",
-                 "Please share your delivery account details (API key / token, account id"
-                 " — one message is fine).",
-                 validate="min_len:4",
-                 invalid="That looks too short to be API details. Please paste them again."),
-            {"id": "ask_payment_provider", "type": "choice", "key": "payment_provider",
-             "prompt": "Which payment app or gateway do you use?",
-             "options": ["Razorpay", "PhonePe", "Paytm", "Stripe", "UPI (collect / QR)",
-                         "Cash on delivery"],
-             "invalid_message": "Please pick one of the payment options listed."},
-            _ask("ask_payment_creds", "payment_api_details",
-                 "Please share your payment gateway details (key id / secret / merchant id"
-                 " — one message is fine).",
-                 validate="min_len:4",
-                 invalid="That looks too short to be API details. Please paste them again."),
-            {"id": "confirm", "type": "confirm", "key": "confirmed",
-             "prompt": "Shall I send these details for verification to our team?",
-             "yes_label": "Yes", "no_label": "No"},
-            {"id": "save", "type": "save_integration", "next": "done"},
-            {"id": "done", "type": "say",
-             "prompt": "Thank you! Your delivery and payment details have been submitted "
-                       "for verification. Our team will confirm shortly, and everything "
-                       "gets connected automatically once approved."},
         ],
     },
     {

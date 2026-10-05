@@ -401,9 +401,10 @@ export interface TestQuestionResult {
 export interface AdminIdentity {
   id: number
   username: string
-  role: string
+  role: 'super_admin' | 'admin' | 'sub_admin' | string
   email: string | null
   permissions: Record<string, boolean>
+  tenant_id?: string | null
 }
 
 export interface PublishResult {

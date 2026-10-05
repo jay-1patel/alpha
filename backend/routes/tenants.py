@@ -71,6 +71,7 @@ def _admin_only(principal: dict) -> str:
     """Only admins may mint tokens, rebind phone ids, or set secrets."""
     if principal.get("type") != "admin":
         raise HTTPException(status_code=403, detail="Admin credentials required")
+    # Allow admin role too
     return principal.get("username", "")
 
 
@@ -87,16 +88,7 @@ def list_tenants(
     status: Optional[str] = None,
     current_admin: dict = Depends(require_permission("manage_operations")),
 ):
-    role = (current_admin.get("role") or "").lower()
-    tenant_id_filter = None
-    if role != "super_admin":
-        tid = current_admin.get("tenant_id")
-        if tid:
-            tenant_id_filter = str(tid)
-
     rows = [_public_tenant(r) for r in tenancy_store.list_tenants(status=status)]
-    if tenant_id_filter:
-        rows = [r for r in rows if str(r.get("id")) == tenant_id_filter]
     for row in rows:
         row["current_version"] = tenancy_store.current_version(row["id"])
     return {"tenants": rows}
