@@ -1,6 +1,6 @@
 """Profile-driven answers for informational intents (panels).
 
-Menu rows like Technologies, Portfolio, Careers and Benefits have no flow and
+Menu rows like Technologies, Projects, Careers and Benefits have no flow and
 no backend service: their entire content is tenant data. The answer text lives
 in the tenant profile (vertical defaults -> clients/<id>/config.json ->
 published DB version), so a tenant that publishes new text changes the panel
@@ -64,7 +64,7 @@ def answer_for_button(wa_id: str, button_id: str, tenant_id=None) -> str | None:
 
 def answer_for_intent(wa_id: str, intent_name: str, tenant_id=None) -> str | None:
     """Answer text for a named intent (also serves registry buttons, whose ids
-    match intent names by convention: portfolio, technologies, careers,
+    match intent names by convention: projects, technologies, careers,
     benefits). None unless the intent is active AND has answer text."""
     if not intent_name:
         return None

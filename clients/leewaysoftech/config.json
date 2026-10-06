@@ -66,7 +66,7 @@
       "answer": "• Here's the stack we build with:\n• *Frontend:* React, Angular and Vue\n• *Backend:* Node.js, Python (Django/Flask), PHP and .NET\n• *Mobile:* Flutter, React Native and native iOS/Android\n• *Cloud & DevOps:* AWS, Azure, GCP, Docker, Kubernetes and CI/CD pipelines\n• *Databases:* PostgreSQL, MySQL, MongoDB and Redis\n• Tell us what you're building and we'll match the right stack for it."
     },
     {
-      "name": "portfolio",
+      "name": "projects",
       "answer": "• A snapshot of the work we deliver:\n• *Web platforms:* e-commerce stores, customer portals and internal systems\n• *Mobile apps:* customer and field-force apps for iOS and Android\n• *Enterprise:* CRM/ERP integrations, workflow automation and analytics dashboards\n• *Industries:* retail, healthcare, finance, logistics and education\n• We share client names and detailed case studies only with their written permission — our team can walk you through relevant examples on a call."
     },
     {

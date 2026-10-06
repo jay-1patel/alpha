@@ -45,6 +45,17 @@ export const tenantsApi = {
       { snapshot },
     ),
 
+  /** Save one info-page intent (technologies / careers / benefits) into the draft. */
+  saveIntent: (
+    id: string,
+    intent: string,
+    body: { answer?: string | null; keywords?: string[]; enabled?: boolean },
+  ) =>
+    api.put<{ ok: boolean; validation: string[] }>(
+      `/api/admin/tenants/${encodeURIComponent(id)}/intents/${encodeURIComponent(intent)}`,
+      body,
+    ),
+
   publish: (id: string) =>
     api.post<{ ok: boolean; version: number; active_intents: string[]; visible_buttons: string[] }>(
       `/api/admin/tenants/${encodeURIComponent(id)}/publish`,

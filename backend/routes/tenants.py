@@ -6,7 +6,8 @@ versioned and rollbackable:
     GET  /api/admin/tenants
     POST /api/admin/tenants
     GET  /api/admin/tenants/{tenant_id}/detail     -> layers + effective profile
-    PUT  /api/admin/tenants/{tenant_id}/profile     -> save draft
+    PUT  /api/admin/tenants/{tenant_id}/profile     -> save draft (merged over the pending draft)
+    PUT  /api/admin/tenants/{tenant_id}/intents/{name} -> save one info-page intent into the draft
     POST /api/admin/tenants/{tenant_id}/publish     -> validate + version + go live
     POST /api/admin/tenants/{tenant_id}/rollback    -> re-point at a prior version
     GET  /api/admin/tenants/{tenant_id}/versions
@@ -22,15 +23,24 @@ enforces token.tenant_id == target (Phase 0.5).
 
 import logging
 import secrets
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
-from routes.auth import hash_tenant_token, require_permission, require_tenant_access
+from routes.auth import (
+    get_current_admin,
+    has_permission,
+    hash_tenant_token,
+    require_permission,
+    require_tenant_access,
+    security,
+)
 from shared.tenancy import cache as tenancy_cache
 from shared.tenancy import loader as tenancy_loader
 from shared.tenancy import store as tenancy_store
+from shared.tenancy.merge import deep_merge
 
 logger = logging.getLogger("tenants")
 router = APIRouter(prefix="/api/admin/tenants", tags=["tenants"])
@@ -53,6 +63,13 @@ class PhoneBind(BaseModel):
 
 class ProfileDraft(BaseModel):
     snapshot: dict = Field(default_factory=dict)
+
+
+class IntentOverride(BaseModel):
+    """One informational intent's editable fields. Omitted keys are not touched."""
+    answer: Optional[str] = None
+    keywords: Optional[List[str]] = None
+    enabled: Optional[bool] = None
 
 
 class RollbackRequest(BaseModel):
@@ -226,17 +243,94 @@ def save_profile_draft(    tenant_id: str,
 
     The draft is validated immediately so the editor can show errors before
     anyone presses publish.
+
+    The draft accumulates: this merges the snapshot over the existing draft
+    instead of replacing it, so partial saves from different screens (the
+    profile editor, the info-page panels) keep each other's pending changes.
     """
     if not tenancy_store.get_tenant(tenant_id):
         raise HTTPException(status_code=404, detail="tenant not found")
     by = principal.get("username") or principal.get("label", "")
-    tenancy_store.save_draft(tenant_id, body.snapshot, updated_by=by)
+    draft = tenancy_store.get_draft(tenant_id) or {}
+    merged = deep_merge(draft, body.snapshot)
+    tenancy_store.save_draft(tenant_id, merged, updated_by=by)
 
     warnings: list = []
     try:
-        tenancy_loader.validate_merged_profile(tenant_id, body.snapshot)
+        tenancy_loader.validate_merged_profile(tenant_id, merged)
     except tenancy_loader.ProfileValidationError as exc:
         # Saving a broken draft is allowed; publishing it is not.
+        warnings.append(str(exc))
+    return {"ok": True, "tenant_id": tenant_id, "has_draft": True, "validation": warnings}
+
+
+# Info pages whose panel edits a single informational intent. The map is the
+# authorisation contract: an intent is editable through this endpoint only if
+# it has a panel and a permission behind it.
+INFO_PAGE_PERMISSIONS = {
+    "projects": "manage_projects",
+    "technologies": "manage_technologies",
+    "careers": "manage_careers",
+    "benefits": "manage_benefits",
+}
+
+
+@router.put("/{tenant_id}/intents/{intent_name}")
+def save_intent_draft(
+    tenant_id: str,
+    intent_name: str,
+    body: IntentOverride,
+    request: Request,
+    principal: dict = Depends(require_tenant_access()),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Merge one informational intent's answer into the working draft.
+
+    Projects / technologies / careers / benefits have no flow and no service:
+    the answer text is the whole page. This merges into the existing draft
+    (never replaces), so a pending profile edit survives a panel save and vice
+    versa. Publishing is what makes the answer live.
+    """
+    if not tenancy_store.get_tenant(tenant_id):
+        raise HTTPException(status_code=404, detail="tenant not found")
+
+    permission = INFO_PAGE_PERMISSIONS.get(intent_name)
+    if not permission:
+        raise HTTPException(status_code=404, detail=f"'{intent_name}' is not an editable info page")
+    # Tenant tokens are scoped to their own tenant above; admins need the
+    # panel's own grant, not just manage_operations.
+    if principal.get("type") != "tenant" and not has_permission(
+        get_current_admin(request, credentials), permission
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=f"You need the '{permission}' permission to edit this page",
+        )
+
+    profile = tenancy_loader.get_tenant_profile(tenant_id)
+    if intent_name not in {i.name for i in profile.intents}:
+        raise HTTPException(
+            status_code=404,
+            detail=f"intent '{intent_name}' is not part of this tenant's profile",
+        )
+
+    override: Dict[str, Any] = {"name": intent_name}
+    if body.answer is not None:
+        override["answer"] = body.answer
+    if body.keywords is not None:
+        override["keywords"] = [k for k in (s.strip() for s in body.keywords) if k]
+    if body.enabled is not None:
+        override["enabled"] = body.enabled
+
+    by = principal.get("username") or principal.get("label", "")
+    draft = tenancy_store.get_draft(tenant_id) or {}
+    merged = deep_merge(draft, {"intents": [override]})
+    tenancy_store.save_draft(tenant_id, merged, updated_by=by)
+
+    warnings: list = []
+    try:
+        tenancy_loader.validate_merged_profile(tenant_id, merged)
+    except tenancy_loader.ProfileValidationError as exc:
         warnings.append(str(exc))
     return {"ok": True, "tenant_id": tenant_id, "has_draft": True, "validation": warnings}
 

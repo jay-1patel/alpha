@@ -76,7 +76,7 @@ ALL_PERMISSIONS = {
     "edit_product": "Edit catalogue entries",
     "delete_product": "Remove catalogue entries",
     "manage_services": "Add/edit/delete services",
-    "manage_portfolio": "Edit the portfolio page",
+    "manage_projects": "Edit the projects page",
     "manage_technologies": "Edit the technologies page",
     "manage_careers": "Edit the careers page",
     "manage_benefits": "Edit the benefits page",

@@ -25,6 +25,7 @@ import { ComplaintsPanel } from '@/components/tenants/complaints-panel'
 import { UploadsPanel } from '@/components/tenants/uploads-panel'
 import { AdminChatPanel } from '@/components/tenants/admin-chat'
 import { IntentsAndFlows } from '@/components/tenants/intents-and-flows'
+import { InfoPagePanel } from '@/components/tenants/info-page-panel'
 import { VersionsPanel } from '@/components/tenants/versions-panel'
 import { LayersPanel } from '@/components/tenants/layers-panel'
 import { TokensPanel } from '@/components/tenants/tokens-panel'
@@ -86,6 +87,10 @@ function Router() {
       {route.view === 'campaigns' && <CampaignsPanel tenantId={route.tenantId} />}
       {route.view === 'distributors' && <DistributorsPanel tenantId={route.tenantId} />}
       {route.view === 'offerings' && <OfferingsPanel tenantId={route.tenantId} />}
+      {route.view === 'projects' && <InfoPagePanel tenantId={route.tenantId} page="projects" />}
+      {route.view === 'technologies' && <InfoPagePanel tenantId={route.tenantId} page="technologies" />}
+      {route.view === 'careers' && <InfoPagePanel tenantId={route.tenantId} page="careers" />}
+      {route.view === 'benefits' && <InfoPagePanel tenantId={route.tenantId} page="benefits" />}
       {route.view === 'chat-history' && <ChatHistoryPanel tenantId={route.tenantId} />}
       {route.view === 'inbox' && <LiveInboxPanel tenantId={route.tenantId} />}
       {route.view === 'complaints' && <ComplaintsPanel tenantId={route.tenantId} />}
@@ -109,14 +114,9 @@ function Router() {
  * Views the sidebar advertises before their screens are built. Keeping them
  * listed (rather than hidden) is deliberate: the navigation is the contract,
  * and a dead link with an honest label beats a silently missing capability.
+ * Every info page now has its panel — this stays empty until the next one.
  */
-const PENDING_VIEWS = new Set<string>([
-  // IT/software vertical info pages — nav first, panels next.
-  'portfolio',
-  'technologies',
-  'careers',
-  'benefits',
-])
+const PENDING_VIEWS = new Set<string>([])
 
 const KNOWN_VIEWS = [
   'overview',
@@ -130,7 +130,7 @@ const KNOWN_VIEWS = [
   'orders',
   'campaigns',
   'distributors',
-  'portfolio',
+  'projects',
   'technologies',
   'careers',
   'benefits',

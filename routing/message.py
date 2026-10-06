@@ -530,7 +530,7 @@ async def process_message(user_text: str, wa_id: str = None, raw_message: dict =
 
     # ── PROFILE-DEFINED INFORMATIONAL INTENTS ─────────────────────────────
     # A typed query that clearly names an answered panel (technologies,
-    # portfolio, careers, benefits...) replies from the tenant's own profile
+    # projects, careers, benefits...) replies from the tenant's own profile
     # text — no LLM and no corpus needed. Falls through untouched when the
     # tenant configured no answer for the matched intent.
     try:

@@ -131,6 +131,8 @@ export interface IntentSpec {
   keywords: string[]
   requires_feature: string | null
   flow: string | null
+  /** Informational intents answer directly with this text (info-page panels). */
+  answer?: string | null
   enabled: boolean
 }
 

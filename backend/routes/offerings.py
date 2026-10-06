@@ -255,8 +255,15 @@ def _write_cells(tenant_id: str, offering_id: int, columns: List[Dict[str, Any]]
     updates = {k: v for k, v in clean.items() if k in dynamic}
     if not updates:
         return
-    assignments = ", ".join(f'"{k}" = ?' for k in updates)
     with get_db_context() as conn:
+        # A registered column can drift from the physical table (schema seeded
+        # before the column existed). The value still reaches the bot through
+        # the attrs_json mirror, so skip the dead column rather than 500.
+        physical = set(record_schema.existing_columns(conn))
+        updates = {k: v for k, v in updates.items() if k in physical}
+        if not updates:
+            return
+        assignments = ", ".join(f'"{k}" = ?' for k in updates)
         conn.execute(
             f"UPDATE products SET {assignments} WHERE id = ? AND tenant_id = ?",
             list(updates.values()) + [offering_id, tenant_id],

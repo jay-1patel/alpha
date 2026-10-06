@@ -298,7 +298,7 @@ class IntentSpec(_Base):
     # Flow to start when this intent wins.
     flow: Optional[str] = None
     # Informational intents answer directly with this text instead of routing
-    # to the RAG pipeline (portfolio, careers, technologies, benefits panels).
+    # to the RAG pipeline (projects, careers, technologies, benefits panels).
     # Tenant data, resolved through the profile merge chain.
     answer: Optional[str] = None
     enabled: bool = True

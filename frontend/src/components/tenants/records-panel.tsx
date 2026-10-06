@@ -574,7 +574,9 @@ function initialCells(columns: RecordColumn[], row?: Offering): Cells {
   const cells: Cells = {}
   for (const column of columns) {
     if (column.type === 'boolean') {
-      cells[column.key] = Boolean(row ? cellValue(row, column) : false)
+      // A new record defaults to visible; every other boolean column
+      // (returnable, includes_flight…) defaults to off.
+      cells[column.key] = Boolean(row ? cellValue(row, column) : column.key === 'is_active')
     } else {
       const value = row ? cellValue(row, column) : null
       cells[column.key] = value === null || value === undefined ? '' : String(value)

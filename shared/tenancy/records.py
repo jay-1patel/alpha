@@ -540,6 +540,12 @@ def coerce_record(columns: List[Dict[str, Any]], values: Dict[str, Any]) -> Dict
         except ColumnError as exc:
             errors[column["key"]] = str(exc)
     for column in columns:
+        # System columns (name, category, price...) travel in the request's own
+        # fields, never in `values`, so a required check here would reject every
+        # save. Their required-ness is enforced by the route instead: pydantic
+        # on create, the existing row on update.
+        if column.get("is_system"):
+            continue
         if column["required"] and clean.get(column["key"]) in (None, ""):
             errors.setdefault(column["key"], f"‘{column['label']}’ is required.")
     return clean, errors

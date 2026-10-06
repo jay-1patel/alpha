@@ -287,8 +287,8 @@ _IT_SOFTWARE = {
             {"id": "menu_technologies", "title": "Technologies", "description": "Our tech stack & expertise",
              "section": "🛠️ Services", "icon": "💻", "sort_order": 1, "requires_feature": "offering_details",
              "intent": "technologies"},
-            {"id": "menu_portfolio", "title": "Portfolio", "description": "Work we have delivered",
-             "section": "🏢 Company", "icon": "📁", "sort_order": 2, "intent": "portfolio"},
+            {"id": "menu_projects", "title": "Projects", "description": "Work we have delivered",
+             "section": "🏢 Company", "icon": "📁", "sort_order": 2, "intent": "projects"},
             {"id": "menu_brochure", "title": "Service Brochure", "description": "Download our brochure",
              "section": "🏢 Company", "icon": "📄", "sort_order": 3, "requires_feature": "brochure_pdf"},
             {"id": "menu_careers", "title": "Careers", "description": "Open roles & hiring process",
@@ -329,8 +329,8 @@ _IT_SOFTWARE = {
         {"name": "demo_request", "examples": ["can I see a demo", "book a demo call"],
          "keywords": ["demo", "demonstration", "walkthrough", "live demo", "sample", "trial"],
          "requires_feature": "book_appointment", "flow": "get_quote"},
-        {"name": "portfolio", "examples": ["show me your work", "who have you built for"],
-         "keywords": ["portfolio", "your work", "case study", "case studies", "projects", "clients", "experience"],
+        {"name": "projects", "examples": ["show me your work", "who have you built for"],
+         "keywords": ["projects", "project", "portfolio", "your work", "case study", "case studies", "clients", "experience"],
          "answer": ("• A snapshot of the work we deliver:\n"
                     "• *Web platforms:* e-commerce, portals and internal systems\n"
                     "• *Mobile apps:* customer and field-force apps on iOS and Android\n"
