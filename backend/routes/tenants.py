@@ -22,6 +22,7 @@ enforces token.tenant_id == target (Phase 0.5).
 """
 
 import logging
+import re
 import secrets
 from typing import Any, Dict, List, Optional
 
@@ -40,7 +41,7 @@ from routes.auth import (
 from shared.tenancy import cache as tenancy_cache
 from shared.tenancy import loader as tenancy_loader
 from shared.tenancy import store as tenancy_store
-from shared.tenancy.merge import deep_merge
+from shared.tenancy.merge import deep_merge, merge_drafts
 
 logger = logging.getLogger("tenants")
 router = APIRouter(prefix="/api/admin/tenants", tags=["tenants"])
@@ -197,6 +198,15 @@ def tenant_detail(tenant_id: str, principal: dict = Depends(require_tenant_acces
         effective = tenancy_loader.get_tenant_profile(tenant_id).to_payload()
     except Exception as exc:  # never fail the editor on a bad layer
         logger.error("Could not build effective profile for %s: %s", tenant_id, exc)
+    # What the editor should show when a working copy is pending: the draft
+    # merged over the file baseline — exactly what publish would make live.
+    pending, pending_error = None, None
+    draft = tenancy_store.get_draft(tenant_id)
+    if draft:
+        try:
+            pending = tenancy_loader.validate_merged_profile(tenant_id, draft).to_payload()
+        except Exception as exc:
+            pending_error = str(exc)
     return {
         "tenant": _public_tenant(layers.get("tenant")),
         "layers": layers.get("layers", {}),
@@ -204,6 +214,9 @@ def tenant_detail(tenant_id: str, principal: dict = Depends(require_tenant_acces
         "versions": layers.get("versions", []),
         "effective": effective,
         "effective_error": None if effective else "effective profile could not be built",
+        "has_draft": bool(draft),
+        "pending": pending,
+        "pending_error": pending_error,
     }
 
 
@@ -247,12 +260,14 @@ def save_profile_draft(    tenant_id: str,
     The draft accumulates: this merges the snapshot over the existing draft
     instead of replacing it, so partial saves from different screens (the
     profile editor, the info-page panels) keep each other's pending changes.
+    Tombstones survive the merge — deleting a default menu option is a marker
+    only the publish-time live merge may consume.
     """
     if not tenancy_store.get_tenant(tenant_id):
         raise HTTPException(status_code=404, detail="tenant not found")
     by = principal.get("username") or principal.get("label", "")
     draft = tenancy_store.get_draft(tenant_id) or {}
-    merged = deep_merge(draft, body.snapshot)
+    merged = merge_drafts(draft, body.snapshot)
     tenancy_store.save_draft(tenant_id, merged, updated_by=by)
 
     warnings: list = []
@@ -274,6 +289,10 @@ INFO_PAGE_PERMISSIONS = {
     "benefits": "manage_benefits",
 }
 
+# A new informational intent created from the menu editor becomes an id the
+# classifier and flow runner switch on, so keep the grammar narrow.
+INTENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+
 
 @router.put("/{tenant_id}/intents/{intent_name}")
 def save_intent_draft(
@@ -287,31 +306,48 @@ def save_intent_draft(
     """Merge one informational intent's answer into the working draft.
 
     Projects / technologies / careers / benefits have no flow and no service:
-    the answer text is the whole page. This merges into the existing draft
-    (never replaces), so a pending profile edit survives a panel save and vice
-    versa. Publishing is what makes the answer live.
+    the answer text is the whole page. A name that does not exist yet is a new
+    page created from the menu editor — gated on manage_operations. This merges
+    into the existing draft (never replaces), so a pending profile edit
+    survives a panel save and vice versa. Publishing is what makes the answer
+    live.
     """
     if not tenancy_store.get_tenant(tenant_id):
         raise HTTPException(status_code=404, detail="tenant not found")
 
+    profile = tenancy_loader.get_tenant_profile(tenant_id)
+    existing = {i.name for i in profile.intents}
+
     permission = INFO_PAGE_PERMISSIONS.get(intent_name)
-    if not permission:
-        raise HTTPException(status_code=404, detail=f"'{intent_name}' is not an editable info page")
+    if permission:
+        if intent_name not in existing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"intent '{intent_name}' is not part of this tenant's profile",
+            )
+    elif intent_name in existing:
+        # Operational intents (place_order, service_enquiry...) have flows and
+        # services behind them; this endpoint only edits answered info pages.
+        raise HTTPException(
+            status_code=404,
+            detail=f"intent '{intent_name}' exists but is not an editable info page",
+        )
+    else:
+        if not INTENT_NAME_RE.match(intent_name):
+            raise HTTPException(
+                status_code=422,
+                detail="Intent names are lowercase letters, digits and underscores, starting with a letter.",
+            )
+        permission = "manage_operations"
+
     # Tenant tokens are scoped to their own tenant above; admins need the
-    # panel's own grant, not just manage_operations.
+    # page's own grant, not just manage_operations.
     if principal.get("type") != "tenant" and not has_permission(
         get_current_admin(request, credentials), permission
     ):
         raise HTTPException(
             status_code=403,
             detail=f"You need the '{permission}' permission to edit this page",
-        )
-
-    profile = tenancy_loader.get_tenant_profile(tenant_id)
-    if intent_name not in {i.name for i in profile.intents}:
-        raise HTTPException(
-            status_code=404,
-            detail=f"intent '{intent_name}' is not part of this tenant's profile",
         )
 
     override: Dict[str, Any] = {"name": intent_name}

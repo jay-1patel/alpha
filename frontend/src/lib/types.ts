@@ -367,6 +367,10 @@ export interface LayerDetail {
   versions: VersionRecord[]
   effective: ProfileSnapshot | null
   effective_error: string | null
+  /** The working draft merged over the file baseline — what publish would go live. */
+  has_draft?: boolean
+  pending?: ProfileSnapshot | null
+  pending_error?: string | null
 }
 
 export interface TenantToken {
