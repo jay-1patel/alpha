@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ChangeEvent } from 'react'
 import {
   AlertTriangle,
   Layers,
@@ -8,12 +8,14 @@ import {
   Search,
   Settings2,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react'
 import { useAction, useAsync } from '@/lib/hooks'
 import { useAuth } from '@/lib/auth'
 import { contentWritePerms } from '@/lib/permissions'
 import { offeringsApi } from '@/lib/offerings'
+import { uploadRecordImage } from '@/lib/uploads'
 import { useTenants } from '@/lib/tenants'
 import { getVertical } from '@/lib/verticals'
 import type { Offering, OfferingInput, RecordColumn, RecordColumnType } from '@/lib/types'
@@ -219,6 +221,7 @@ export function RecordsPanel({ tenantId }: { tenantId: string }) {
 
       {creating && (
         <RecordForm
+          tenantId={tenantId}
           columns={columns}
           content={content}
           busy={action.busy}
@@ -236,6 +239,7 @@ export function RecordsPanel({ tenantId }: { tenantId: string }) {
 
       {editing && (
         <RecordForm
+          tenantId={tenantId}
           columns={columns}
           content={content}
           initial={editing}
@@ -586,6 +590,7 @@ function initialCells(columns: RecordColumn[], row?: Offering): Cells {
 }
 
 function RecordForm({
+  tenantId,
   columns,
   content,
   initial,
@@ -593,6 +598,7 @@ function RecordForm({
   onSubmit,
   onCancel,
 }: {
+  tenantId: string
   columns: RecordColumn[]
   content: ReturnType<typeof getVertical>['content']
   initial?: Offering
@@ -602,10 +608,32 @@ function RecordForm({
 }) {
   const [cells, setCells] = useState<Cells>(() => initialCells(columns, initial))
   const [touched, setTouched] = useState(false)
+  const [imageBusy, setImageBusy] = useState(false)
+  const [imageError, setImageError] = useState<string | null>(null)
 
   const set = (key: string, value: string | boolean) => setCells((c) => ({ ...c, [key]: value }))
   const nameColumn = columns.find((c) => c.key === 'name')
   const nameMissing = touched && nameColumn && !String(cells.name ?? '').trim()
+
+  const pickImage = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setImageError('Only image files (PNG, JPG, WebP…) can be uploaded.')
+      return
+    }
+    setImageBusy(true)
+    setImageError(null)
+    try {
+      const url = await uploadRecordImage(tenantId, file)
+      set('media_url', url)
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : 'The upload failed.')
+    } finally {
+      setImageBusy(false)
+    }
+  }
 
   const submit = () => {
     setTouched(true)
@@ -694,6 +722,51 @@ function RecordForm({
                     ))}
                   </select>
                   {column.help && <p className="hint">{column.help}</p>}
+                </div>
+              )
+            }
+            if (column.key === 'media_url') {
+              const url = String(value ?? '')
+              return (
+                <div key={column.key}>
+                  <label className="field-label">{column.label}</label>
+                  {url ? (
+                    <div className="flex items-center gap-2.5 rounded-lg bg-surface-raised p-2 ring-1 ring-inset ring-surface-line">
+                      <img
+                        src={url}
+                        alt=""
+                        className="h-10 w-10 shrink-0 rounded object-cover ring-1 ring-inset ring-surface-line"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-xs text-slate-500">{url}</span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Trash2 className="h-3.5 w-3.5" />}
+                        onClick={() => set('media_url', '')}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <label
+                      className={cn(
+                        'flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-surface-raised py-2 text-sm text-slate-300 ring-1 ring-inset ring-surface-line transition hover:bg-accent-50 hover:text-slate-100',
+                        imageBusy && 'pointer-events-none opacity-60',
+                      )}
+                    >
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={imageBusy}
+                        onChange={pickImage}
+                      />
+                      <Upload className="h-4 w-4" />
+                      {imageBusy ? 'Uploading…' : 'Upload image'}
+                    </label>
+                  )}
+                  {imageError && <p className="hint text-rose-700">{imageError}</p>}
+                  {column.help && !imageError && <p className="hint">{column.help}</p>}
                 </div>
               )
             }

@@ -249,6 +249,21 @@ def _prepare_values(
     return clean, attrs_json
 
 
+#: Presentation columns (price, link, image) that the forms also send as
+#: top-level record fields. Seed them into the cells so a column the admin
+#: marked required validates, whatever path the value arrived by.
+_SHARED_TOP_FIELDS = ("price", "detail_url", "media_url")
+
+
+def _cell_values(values: Optional[Dict[str, Any]], body) -> Dict[str, Any]:
+    merged = dict(values or {})
+    for field in _SHARED_TOP_FIELDS:
+        value = getattr(body, field, None)
+        if value is not None and field not in merged:
+            merged[field] = value
+    return merged
+
+
 def _write_cells(tenant_id: str, offering_id: int, columns: List[Dict[str, Any]], clean: Dict[str, Any]):
     """Push coerced values into the physical columns the admin created."""
     dynamic = {c["key"] for c in columns if not c["is_system"]}
@@ -378,7 +393,7 @@ def list_offering_categories(tenant_id: str, principal: dict = Depends(read_acce
 @router.post("/offerings")
 def create_offering(tenant_id: str, body: OfferingIn, principal: dict = Depends(_require_write_access("create"))):
     columns = _columns(tenant_id)
-    clean, attrs_json = _prepare_values(columns, body.values, body.attrs)
+    clean, attrs_json = _prepare_values(columns, _cell_values(body.values, body), body.attrs)
 
     offering_id = save_product(
         name=body.name.strip(),
@@ -422,7 +437,7 @@ def patch_offering(tenant_id: str, offering_id: int, body: OfferingPatch, princi
         updates["media_url"] = None
 
     if body.values is not None or body.attrs is not None:
-        clean, attrs_json = _prepare_values(columns, body.values or {}, body.attrs or {})
+        clean, attrs_json = _prepare_values(columns, _cell_values(body.values, body), body.attrs or {})
         updates["attrs_json"] = attrs_json
     else:
         clean = {}
