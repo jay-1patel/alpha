@@ -32,10 +32,13 @@ import { TokensPanel } from '@/components/tenants/tokens-panel'
 import { TestAndSmoke } from '@/components/tenants/test-and-smoke'
 import { TeamScreen } from '@/components/team/team-screen'
 import { RegisterWizard } from '@/components/onboarding/register-wizard'
+import { ApiOnboardingPanel } from '@/components/tenants/api-onboarding-panel'
+import { ApiOnboardingReview } from '@/components/team/api-onboarding-review'
 
 function Router() {
   const route = parseRoute(useRoute())
-  const { canManageTenants, canManageTeam } = usePermissions()
+  const { canManageTenants, canManageTeam, isSuperAdmin, can } = usePermissions()
+  const { identity } = useAuth()
 
   if (route.view === 'register') {
     if (!canManageTenants) return <NotPermitted what="register tenants" />
@@ -55,6 +58,15 @@ function Router() {
     )
   }
 
+  if (route.view === 'api-requests') {
+    if (!isSuperAdmin) return <NotPermitted what="review API access requests" />
+    return (
+      <AppShell route={route}>
+        <ApiOnboardingReview />
+      </AppShell>
+    )
+  }
+
   if (!route.tenantId) {
     return (
       <AppShell route={route}>
@@ -64,6 +76,17 @@ function Router() {
   }
 
   const writeViews = new Set(['profile', 'menu-edit', 'versions', 'tokens'])
+  if (route.view === 'api-access') {
+    if (isSuperAdmin || !identity?.tenant_id || route.tenantId !== identity.tenant_id || !can('manage_operations')) {
+      return <AppShell route={route}><NotPermitted what="request API access for this tenant" /></AppShell>
+    }
+    return (
+      <AppShell route={route}>
+        <ApiOnboardingPanel />
+      </AppShell>
+    )
+  }
+
   if (writeViews.has(route.view) && !canManageTenants) {
     return (
       <AppShell route={route}>
@@ -143,6 +166,8 @@ const KNOWN_VIEWS = [
   'layers',
   'tokens',
   'test',
+  'api-access',
+  'api-requests',
 ]
 
 function ComingSoon({ view }: { view: string }) {

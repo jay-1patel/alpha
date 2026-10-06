@@ -723,6 +723,7 @@ def init_db():
         _ensure_columns(conn, "products", [("stock_quantity", "INTEGER")])
 
         _init_tenancy_tables(conn)
+        _init_api_onboarding_tables(conn)
         _init_offerings_migration(conn)
         _init_record_columns_table(conn)
         _init_conversation_state_columns(conn)
@@ -869,6 +870,68 @@ def _init_tenancy_tables(conn):
     )
     _init_lead_tables(conn)
     _init_embedding_tenancy(conn)
+
+
+def _init_api_onboarding_tables(conn):
+    """API access requests and append-only review events; never store credentials here."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS api_onboarding_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL,
+            api_type TEXT NOT NULL CHECK (api_type IN ('payment_api', 'order_api')),
+            provider TEXT NOT NULL DEFAULT '',
+            environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
+            purpose TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'approved', 'rejected')),
+            requester_id INTEGER,
+            requester_username TEXT NOT NULL DEFAULT '',
+            reviewer_id INTEGER,
+            reviewer_username TEXT,
+            decision_note TEXT NOT NULL DEFAULT '',
+            decided_at TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    conn.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS ux_api_onboarding_pending
+           ON api_onboarding_requests(tenant_id, api_type) WHERE status IN ('pending', 'approved')"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS api_onboarding_entitlements (
+            tenant_id TEXT NOT NULL,
+            api_type TEXT NOT NULL CHECK (api_type IN ('payment_api', 'order_api')),
+            request_id INTEGER NOT NULL REFERENCES api_onboarding_requests(id),
+            granted_by INTEGER,
+            granted_by_username TEXT NOT NULL DEFAULT '',
+            granted_at TEXT NOT NULL,
+            PRIMARY KEY (tenant_id, api_type),
+            UNIQUE (request_id)
+        )"""
+    )
+    conn.execute(
+        """CREATE INDEX IF NOT EXISTS ix_api_onboarding_tenant
+           ON api_onboarding_requests(tenant_id, created_at DESC)"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS api_onboarding_request_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER NOT NULL REFERENCES api_onboarding_requests(id),
+            actor_id INTEGER,
+            actor_username TEXT NOT NULL DEFAULT '',
+            actor_role TEXT NOT NULL DEFAULT '',
+            event_type TEXT NOT NULL CHECK (event_type IN ('submitted', 'decision')),
+            old_status TEXT,
+            new_status TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_api_onboarding_events_request "
+        "ON api_onboarding_request_events(request_id, id)"
+    )
 
 
 # ── Phase 3: data-defined flows write leads and handoffs ─────────────────
