@@ -724,6 +724,7 @@ def init_db():
 
         _init_tenancy_tables(conn)
         _init_api_onboarding_tables(conn)
+        _init_admin_audit_tables(conn)
         _init_integration_tables(conn)
         _init_offerings_migration(conn)
         _init_record_columns_table(conn)
@@ -933,6 +934,84 @@ def _init_api_onboarding_tables(conn):
         "CREATE INDEX IF NOT EXISTS ix_api_onboarding_events_request "
         "ON api_onboarding_request_events(request_id, id)"
     )
+
+
+def _init_admin_audit_tables(conn):
+    """Create the durable, append-only audit log retained for one year."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS admin_audit_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            actor_id INTEGER,
+            actor_username TEXT,
+            actor_role TEXT,
+            action TEXT NOT NULL,
+            outcome TEXT NOT NULL DEFAULT 'success' CHECK (outcome IN ('success', 'failure')),
+            resource_type TEXT NOT NULL DEFAULT '',
+            resource_id TEXT NOT NULL DEFAULT '',
+            target_username TEXT,
+            tenant_id TEXT,
+            details_json TEXT NOT NULL DEFAULT '{}'
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_admin_audit_created ON admin_audit_events(created_at DESC, id DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_admin_audit_actor ON admin_audit_events(actor_username, created_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_admin_audit_action ON admin_audit_events(action, created_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_admin_audit_tenant ON admin_audit_events(tenant_id, created_at DESC)")
+    conn.execute("DELETE FROM admin_audit_events WHERE datetime(created_at) < datetime('now', '-365 days')")
+
+
+_AUDIT_SENSITIVE_KEY_PARTS = (
+    "password", "otp", "token", "secret", "credential", "authorization", "api_key", "payload", "body",
+)
+
+
+def safe_audit_details(value):
+    """Remove secret-like keys recursively before storing or returning details."""
+    if isinstance(value, dict):
+        return {
+            str(key): safe_audit_details(item)
+            for key, item in value.items()
+            if not any(part in str(key).lower().replace('-', '_') for part in _AUDIT_SENSITIVE_KEY_PARTS)
+        }
+    if isinstance(value, (list, tuple)):
+        return [safe_audit_details(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def record_admin_audit_event(
+    conn,
+    *,
+    action: str,
+    actor: dict | None = None,
+    outcome: str = "success",
+    resource_type: str = "",
+    resource_id: str | int | None = None,
+    target_username: str | None = None,
+    tenant_id: str | None = None,
+    details: dict | None = None,
+) -> int:
+    """Record an audit event using the caller's transaction."""
+    if outcome not in {"success", "failure"}:
+        raise ValueError("Audit outcome must be success or failure")
+    actor = actor or {}
+    conn.execute("DELETE FROM admin_audit_events WHERE datetime(created_at) < datetime('now', '-365 days')")
+    cursor = conn.execute(
+        """INSERT INTO admin_audit_events
+           (created_at, actor_id, actor_username, actor_role, action, outcome,
+            resource_type, resource_id, target_username, tenant_id, details_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            datetime.now(timezone.utc).isoformat(), actor.get("id"), actor.get("username"),
+            actor.get("role"), action, outcome, resource_type,
+            "" if resource_id is None else str(resource_id), target_username,
+            tenant_id or actor.get("tenant_id"),
+            json.dumps(safe_audit_details(details or {}), ensure_ascii=False),
+        ),
+    )
+    return int(cursor.lastrowid)
 
 
 def _init_integration_tables(conn):
@@ -1278,11 +1357,12 @@ def get_draft_config(scope: str, default=None):
     return _loads_json(row["snapshot_json"])
 
 
-def save_draft_config(scope: str, snapshot: dict, updated_by: str = "") -> bool:
+def save_draft_config(scope: str, snapshot: dict, updated_by: str = "", conn=None) -> bool:
     """Save a draft snapshot for a scope. Does not affect the live bot."""
     payload = json.dumps(snapshot)
-    with get_db_context() as conn:
-        conn.execute(
+
+    def _save(connection):
+        connection.execute(
             """INSERT INTO draft_config (scope, snapshot_json, updated_by, updated_at)
                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                ON CONFLICT(scope) DO UPDATE SET
@@ -1291,22 +1371,28 @@ def save_draft_config(scope: str, snapshot: dict, updated_by: str = "") -> bool:
                    updated_at = CURRENT_TIMESTAMP""",
             (scope, payload, updated_by),
         )
+
+    if conn is None:
+        with get_db_context() as own_conn:
+            _save(own_conn)
+    else:
+        _save(conn)
     return True
 
 
-def publish_config(scope: str, published_by: str = "") -> bool:
+def publish_config(scope: str, published_by: str = "", conn=None) -> bool:
     """Copy the current draft to published and append to history.
 
     If no draft exists, the published config is left unchanged.
     """
-    with get_db_context() as conn:
-        draft = conn.execute(
+    def _publish(connection):
+        draft = connection.execute(
             "SELECT snapshot_json FROM draft_config WHERE scope = ?", (scope,)
         ).fetchone()
         if not draft:
             return False
         snapshot_json = draft["snapshot_json"]
-        conn.execute(
+        connection.execute(
             """INSERT INTO published_config (scope, snapshot_json, published_by, published_at)
                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                ON CONFLICT(scope) DO UPDATE SET
@@ -1315,11 +1401,16 @@ def publish_config(scope: str, published_by: str = "") -> bool:
                    published_at = excluded.published_at""",
             (scope, snapshot_json, published_by),
         )
-        conn.execute(
+        connection.execute(
             "INSERT INTO publish_history (scope, snapshot_json, published_by, published_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
             (scope, snapshot_json, published_by),
         )
-    return True
+        return True
+
+    if conn is None:
+        with get_db_context() as own_conn:
+            return _publish(own_conn)
+    return _publish(conn)
 
 
 def get_publish_history(scope: str, limit: int = 20) -> list:
