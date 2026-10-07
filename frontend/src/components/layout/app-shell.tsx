@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import { ArrowLeft, Blocks, ChevronDown, LayoutGrid, LogOut, PlusCircle, UserRound, Users, ShieldCheck, KeyRound, ScrollText } from 'lucide-react'
+import { ArrowLeft, Blocks, ChevronDown, ClipboardCheck, LayoutGrid, LogOut, PlusCircle, Send, UserRound, Users, ShieldCheck, KeyRound, ScrollText } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useTenantFeatures, useTenants } from '@/lib/tenants'
 import { useOfferingsCount } from '@/lib/offerings'
@@ -44,7 +44,7 @@ export function AppShell({ route, children }: { route: RouteMatch; children: Rea
         </div>
 
         <div className="px-3">
-          {can(TENANT_PERMISSION) ? (
+          {can(TENANT_PERMISSION) || identity?.role === 'admin' ? (
             <Button
               variant="primary"
               className="w-full"
@@ -176,51 +176,81 @@ export function AppShell({ route, children }: { route: RouteMatch; children: Rea
             </p>
           )}
 
-          {(identity?.role === 'super_admin' || (identity && identity.role !== 'super_admin' && Boolean(identity.tenant_id) && can('manage_operations'))) && (
+          {(identity?.role === 'super_admin' || (identity && identity.role !== 'super_admin' && can('manage_operations'))) && (
             <div className="border-t border-surface-line pt-3">
               {identity?.role === 'super_admin' ? (
-                <div>
-                <button
-                  type="button"
-                  onClick={() => navigate('/api-requests')}
-                  className={cn(
-                    'mb-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition',
-                    route.view === 'api-requests'
-                      ? 'bg-accent-100 font-medium text-accent-800'
-                      : 'text-slate-400 hover:bg-accent-50 hover:text-slate-100',
-                  )}
-                >
-                  <ShieldCheck className="h-4 w-4 shrink-0" />
-                  API access review
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate('/audit-history')}
-                  className={cn(
-                    'mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition',
-                    route.view === 'audit-history'
-                      ? 'bg-accent-100 font-medium text-accent-800'
-                      : 'text-slate-400 hover:bg-accent-50 hover:text-slate-100',
-                  )}
-                >
-                  <ScrollText className="h-4 w-4 shrink-0" />
-                  Audit history
-                </button>
-                </div>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/tenant-requests')}
+                    className={cn(
+                      'mb-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition',
+                      route.view === 'tenant-requests'
+                        ? 'bg-accent-100 font-medium text-accent-800'
+                        : 'text-slate-400 hover:bg-accent-50 hover:text-slate-100',
+                    )}
+                  >
+                    <ClipboardCheck className="h-4 w-4 shrink-0" />
+                    Tenant change review
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/api-requests')}
+                    className={cn(
+                      'mb-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition',
+                      route.view === 'api-requests'
+                        ? 'bg-accent-100 font-medium text-accent-800'
+                        : 'text-slate-400 hover:bg-accent-50 hover:text-slate-100',
+                    )}
+                  >
+                    <ShieldCheck className="h-4 w-4 shrink-0" />
+                    API access review
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/audit-history')}
+                    className={cn(
+                      'mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition',
+                      route.view === 'audit-history'
+                        ? 'bg-accent-100 font-medium text-accent-800'
+                        : 'text-slate-400 hover:bg-accent-50 hover:text-slate-100',
+                    )}
+                  >
+                    <ScrollText className="h-4 w-4 shrink-0" />
+                    Audit history
+                  </button>
+                </>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => navigate(`/tenants/${encodeURIComponent(identity.tenant_id!)}/api-access`)}
-                  className={cn(
-                    'mb-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition',
-                    route.view === 'api-access'
-                      ? 'bg-accent-100 font-medium text-accent-800'
-                      : 'text-slate-400 hover:bg-accent-50 hover:text-slate-100',
+                <>
+                  {identity?.tenant_id && (
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/tenants/${encodeURIComponent(identity.tenant_id!)}/api-access`)}
+                      className={cn(
+                        'mb-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition',
+                        route.view === 'api-access'
+                          ? 'bg-accent-100 font-medium text-accent-800'
+                          : 'text-slate-400 hover:bg-accent-50 hover:text-slate-100',
+                      )}
+                    >
+                      <KeyRound className="h-4 w-4 shrink-0" />
+                      API access
+                    </button>
                   )}
-                >
-                  <KeyRound className="h-4 w-4 shrink-0" />
-                  API access
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/tenant-requests')}
+                    className={cn(
+                      'mb-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition',
+                      route.view === 'tenant-requests'
+                        ? 'bg-accent-100 font-medium text-accent-800'
+                        : 'text-slate-400 hover:bg-accent-50 hover:text-slate-100',
+                    )}
+                  >
+                    <Send className="h-4 w-4 shrink-0" />
+                    My change requests
+                  </button>
+                </>
               )}
             </div>
           )}

@@ -724,6 +724,7 @@ def init_db():
 
         _init_tenancy_tables(conn)
         _init_api_onboarding_tables(conn)
+        _init_tenant_change_tables(conn)
         _init_admin_audit_tables(conn)
         _init_integration_tables(conn)
         _init_offerings_migration(conn)
@@ -936,8 +937,59 @@ def _init_api_onboarding_tables(conn):
     )
 
 
+def _init_tenant_change_tables(conn):
+    """Tenant registration/publish approval queue and append-only request events."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS tenant_change_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_type TEXT NOT NULL CHECK (request_type IN ('create_tenant', 'publish_profile')),
+            tenant_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            summary TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+            requester_id INTEGER,
+            requester_username TEXT NOT NULL DEFAULT '',
+            reviewer_id INTEGER,
+            reviewer_username TEXT,
+            decision_note TEXT NOT NULL DEFAULT '',
+            decided_at TEXT,
+            applied INTEGER NOT NULL DEFAULT 0,
+            applied_version INTEGER,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_tenant_change_requests_status ON tenant_change_requests(status, created_at DESC, id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_tenant_change_requests_requester ON tenant_change_requests(requester_id, created_at DESC, id DESC)"
+    )
+    conn.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS ux_tenant_change_pending
+           ON tenant_change_requests(request_type, tenant_id) WHERE status = 'pending'"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS tenant_change_request_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER NOT NULL REFERENCES tenant_change_requests(id) ON DELETE CASCADE,
+            actor_id INTEGER,
+            actor_username TEXT NOT NULL DEFAULT '',
+            actor_role TEXT NOT NULL DEFAULT '',
+            event_type TEXT NOT NULL CHECK (event_type IN ('submitted', 'decision')),
+            old_status TEXT,
+            new_status TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_tenant_change_events_request ON tenant_change_request_events(request_id, id)"
+    )
+
+
 def _init_admin_audit_tables(conn):
-    """Create the durable, append-only audit log retained for one year."""
+    """Create the durable, append-only admin audit log retained for one year."""
     conn.execute(
         """CREATE TABLE IF NOT EXISTS admin_audit_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
