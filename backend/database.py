@@ -1003,7 +1003,9 @@ def _init_admin_audit_tables(conn):
             resource_id TEXT NOT NULL DEFAULT '',
             target_username TEXT,
             tenant_id TEXT,
-            details_json TEXT NOT NULL DEFAULT '{}'
+            details_json TEXT NOT NULL DEFAULT '{}',
+            ip_address TEXT,
+            user_agent TEXT
         )"""
     )
     conn.execute("CREATE INDEX IF NOT EXISTS ix_admin_audit_created ON admin_audit_events(created_at DESC, id DESC)")
@@ -1044,6 +1046,8 @@ def record_admin_audit_event(
     target_username: str | None = None,
     tenant_id: str | None = None,
     details: dict | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> int:
     """Record an audit event using the caller's transaction."""
     if outcome not in {"success", "failure"}:
@@ -1053,14 +1057,16 @@ def record_admin_audit_event(
     cursor = conn.execute(
         """INSERT INTO admin_audit_events
            (created_at, actor_id, actor_username, actor_role, action, outcome,
-            resource_type, resource_id, target_username, tenant_id, details_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            resource_type, resource_id, target_username, tenant_id, details_json,
+            ip_address, user_agent)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             datetime.now(timezone.utc).isoformat(), actor.get("id"), actor.get("username"),
             actor.get("role"), action, outcome, resource_type,
             "" if resource_id is None else str(resource_id), target_username,
             tenant_id or actor.get("tenant_id"),
             json.dumps(safe_audit_details(details or {}), ensure_ascii=False),
+            ip_address, user_agent
         ),
     )
     return int(cursor.lastrowid)
