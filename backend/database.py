@@ -2015,3 +2015,414 @@ def get_all_admins_except(current_username: str) -> list:
             (current_username,),
         ).fetchall()
         return [r["username"] for r in rows]
+
+
+# ── Audit History Functions ─────────────────────────────────────────────
+
+def _ensure_audit_tables():
+    """Ensure audit history tables exist."""
+    with get_db_context() as conn:
+        # Main audit events table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS audit_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                actor_id INTEGER,
+                actor_username TEXT,
+                actor_role TEXT,
+                action TEXT NOT NULL,
+                outcome TEXT DEFAULT 'success',
+                resource_type TEXT,
+                resource_id TEXT,
+                target_username TEXT,
+                tenant_id TEXT,
+                details JSON,
+                ip_address TEXT,
+                user_agent TEXT
+            )
+        ''')
+        
+        # Indexes for faster queries
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_history(created_at)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_history(actor_username)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_history(action)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_history(tenant_id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_audit_outcome ON audit_history(outcome)')
+
+def save_audit_event(action: str, actor_username: str = None, actor_role: str = None, 
+                   target_username: str = None, tenant_id: str = None, outcome: str = "success",
+                   resource_type: str = None, resource_id: str = None, details: dict = None,
+                   ip_address: str = None, user_agent: str = None):
+    """Save an audit event to the history."""
+    with get_db_context() as conn:
+        conn.execute('''
+            INSERT INTO audit_history (
+                created_at, actor_username, actor_role, action, outcome,
+                resource_type, resource_id, target_username, tenant_id, details, ip_address, user_agent
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            datetime.now(timezone.utc).isoformat(),
+            actor_username, actor_role, action, outcome,
+            resource_type, resource_id, target_username, tenant_id,
+            json.dumps(details or {}),
+            ip_address, user_agent
+        ))
+        return conn.total_changes
+
+def list_audit_history(filters: dict = None, limit: int = 50, offset: int = 0) -> dict:
+    """List audit history with filters and pagination."""
+    filters = filters or {}
+    where_clauses = []
+    params = []
+    
+    if filters.get('start_date'):
+        where_clauses.append("created_at >= ?")
+        params.append(filters['start_date'])
+    
+    if filters.get('end_date'):
+        where_clauses.append("created_at <= ?")
+        params.append(filters['end_date'] + " 23:59:59")
+    
+    if filters.get('actor'):
+        where_clauses.append("actor_username LIKE ?")
+        params.append(f"%{filters['actor']}%")
+    
+    if filters.get('action'):
+        where_clauses.append("action = ?")
+        params.append(filters['action'])
+    
+    if filters.get('category'):
+        # For category filtering, we need to map category to action
+        # This is handled in the service layer
+        pass
+    
+    if filters.get('tenant_id'):
+        where_clauses.append("tenant_id = ?")
+        params.append(filters['tenant_id'])
+    
+    if filters.get('outcome'):
+        where_clauses.append("outcome = ?")
+        params.append(filters['outcome'])
+    
+    if filters.get('search'):
+        search_term = f"%{filters['search']}%"
+        where_clauses.append("(actor_username LIKE ? OR target_username LIKE ? OR action LIKE ? OR resource_type LIKE ?)")
+        params.extend([search_term, search_term, search_term, search_term])
+    
+    sort_by = filters.get('sort_by', 'created_at')
+    sort_order = filters.get('sort_order', 'desc')
+    
+    # Ensure sort_by is valid
+    valid_sort_columns = ['created_at', 'action', 'actor_username', 'outcome', 'tenant_id']
+    if sort_by not in valid_sort_columns:
+        sort_by = 'created_at'
+    
+    # Ensure sort_order is valid
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'desc'
+    
+    where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+    
+    with get_db_context() as conn:
+        # Get total count first
+        count_query = f"SELECT COUNT(*) as total FROM audit_history WHERE {where_sql}"
+        count_row = conn.execute(count_query, params).fetchone()
+        total = count_row['total'] if count_row else 0
+        
+        # Get the events
+        query = f"""
+            SELECT * FROM audit_history 
+            WHERE {where_sql}
+            ORDER BY {sort_by} {sort_order}
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+        rows = conn.execute(query, params).fetchall()
+        
+        events = []
+        for row in rows:
+            events.append({
+                'id': row['id'],
+                'created_at': row['created_at'],
+                'actor_id': row['actor_id'],
+                'actor_username': row['actor_username'],
+                'actor_role': row['actor_role'],
+                'action': row['action'],
+                'outcome': row['outcome'],
+                'resource_type': row['resource_type'],
+                'resource_id': row['resource_id'],
+                'target_username': row['target_username'],
+                'tenant_id': row['tenant_id'],
+                'details': _loads_json(row['details'], {}),
+                'ip_address': row['ip_address'],
+                'user_agent': row['user_agent']
+            })
+        
+        return {
+            'events': events,
+            'total': total,
+            'limit': limit,
+            'offset': offset
+        }
+
+def get_audit_statistics(filters: dict = None) -> dict:
+    """Get statistics for audit history."""
+    filters = filters or {}
+    where_clauses = []
+    params = []
+    
+    if filters.get('start_date') and filters.get('end_date'):
+        where_clauses.append("created_at >= ? AND created_at <= ?")
+        params.extend([filters['start_date'], filters['end_date'] + " 23:59:59"])
+    
+    if filters.get('tenant_id'):
+        where_clauses.append("tenant_id = ?")
+        params.append(filters['tenant_id'])
+    
+    where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+    
+    with get_db_context() as conn:
+        # Total events
+        total_row = conn.execute(f"SELECT COUNT(*) as total FROM audit_history WHERE {where_sql}", params).fetchone()
+        total_events = total_row['total'] if total_row else 0
+        
+        # By outcome
+        outcome_rows = conn.execute(f"""
+            SELECT outcome, COUNT(*) as count 
+            FROM audit_history 
+            WHERE {where_sql}
+            GROUP BY outcome
+        """, params).fetchall()
+        
+        by_outcome = {}
+        for row in outcome_rows:
+            by_outcome[row['outcome']] = row['count']
+        
+        # By action
+        action_rows = conn.execute(f"""
+            SELECT action, COUNT(*) as count 
+            FROM audit_history 
+            WHERE {where_sql}
+            GROUP BY action 
+            ORDER BY count DESC
+            LIMIT 20
+        """, params).fetchall()
+        
+        by_action = {}
+        for row in action_rows:
+            by_action[row['action']] = row['count']
+        
+        # By actor
+        actor_rows = conn.execute(f"""
+            SELECT actor_username, COUNT(*) as count 
+            FROM audit_history 
+            WHERE {where_sql} AND actor_username IS NOT NULL
+            GROUP BY actor_username 
+            ORDER BY count DESC
+            LIMIT 10
+        """, params).fetchall()
+        
+        by_actor = {}
+        for row in actor_rows:
+            by_actor[row['actor_username']] = row['count']
+        
+        # By tenant - get activity by tenant
+        tenant_rows = conn.execute(f"""
+            SELECT 
+                COALESCE(tenant_id, 'system') as tenant_id, 
+                COUNT(*) as count
+            FROM audit_history 
+            WHERE {where_sql}
+            GROUP BY COALESCE(tenant_id, 'system')
+            ORDER BY count DESC
+        """, params).fetchall()
+        
+        by_tenant = {}
+        for row in tenant_rows:
+            by_tenant[row['tenant_id']] = row['count']
+        
+        return {
+            'total_events': total_events,
+            'by_outcome': by_outcome,
+            'by_action': by_action,
+            'by_actor': by_actor,
+            'by_tenant': by_tenant
+        }
+
+
+def list_audit_history_by_tenant(filters: dict = None, limit: int = 50, offset: int = 0) -> dict:
+    """List audit history grouped and filtered by tenant."""
+    filters = filters or {}
+    where_clauses = []
+    params: list = []
+    
+    # Handle tenant-specific filtering
+    tenant_filter = filters.get('tenant_id')
+    
+    if filters.get('start_date'):
+        where_clauses.append("ah.created_at >= ?")
+        params.append(filters['start_date'])
+    
+    if filters.get('end_date'):
+        where_clauses.append("ah.created_at <= ?")
+        params.append(filters['end_date'] + " 23:59:59")
+    
+    if tenant_filter:
+        where_clauses.append("ah.tenant_id = ?")
+        params.append(tenant_filter)
+    
+    if filters.get('actor'):
+        where_clauses.append("ah.actor_username LIKE ?")
+        params.append(f"%{filters['actor']}%")
+    
+    if filters.get('action'):
+        where_clauses.append("ah.action = ?")
+        params.append(filters['action'])
+    
+    if filters.get('outcome'):
+        where_clauses.append("ah.outcome = ?")
+        params.append(filters['outcome'])
+    
+    if filters.get('search'):
+        search_term = f"%{filters['search']}%"
+        where_clauses.append("(ah.actor_username LIKE ? OR ah.target_username LIKE ? OR ah.action LIKE ? OR ah.resource_type LIKE ?)")
+        params.extend([search_term, search_term, search_term, search_term])
+    
+    sort_by = filters.get('sort_by', 'created_at')
+    sort_order = filters.get('sort_order', 'desc')
+    
+    # Ensure valid sorting
+    valid_sort_columns = ['created_at', 'action', 'actor_username', 'outcome', 'tenant_id']
+    if sort_by not in valid_sort_columns:
+        sort_by = 'created_at'
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'desc'
+    
+    where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+    
+    with get_db_context() as conn:
+        # Get distinct tenants for this query
+        tenant_query = f"""
+            SELECT DISTINCT COALESCE(ah.tenant_id, 'system') as tenant_id 
+            FROM audit_history ah
+            WHERE {where_sql}
+            ORDER BY tenant_id
+        """
+        tenants = conn.execute(tenant_query, params).fetchall()
+        
+        # For each tenant, get their audit events
+        grouped_events = {}
+        total_count = 0
+        
+        for tenant_row in tenants:
+            tenant_id = tenant_row['tenant_id']
+            tenant_params = params.copy()
+            
+            # Add tenant filter for this specific tenant
+            if tenant_id != 'system':
+                tenant_where = f"{where_sql} AND ah.tenant_id = ?"
+                tenant_params.append(tenant_id)
+            else:
+                tenant_where = f"{where_sql} AND (ah.tenant_id IS NULL OR ah.tenant_id = '')"
+            
+            # Count events for this tenant
+            count_query = f"SELECT COUNT(*) as count FROM audit_history ah WHERE {tenant_where}"
+            count_row = conn.execute(count_query, tenant_params).fetchone()
+            tenant_count = count_row['count'] if count_row else 0
+            total_count += tenant_count
+            
+            # Get events for this tenant
+            event_query = f"""
+                SELECT * FROM audit_history ah
+                WHERE {tenant_where}
+                ORDER BY {sort_by} {sort_order}
+                LIMIT ? OFFSET ?
+            """
+            tenant_params.extend([limit, offset])
+            events = conn.execute(event_query, tenant_params).fetchall()
+            
+            # Format events
+            formatted_events = []
+            for event in events:
+                formatted_events.append({
+                    'id': event['id'],
+                    'created_at': event['created_at'],
+                    'actor_id': event['actor_id'],
+                    'actor_username': event['actor_username'],
+                    'actor_role': event['actor_role'],
+                    'action': event['action'],
+                    'outcome': event['outcome'],
+                    'resource_type': event['resource_type'],
+                    'resource_id': event['resource_id'],
+                    'target_username': event['target_username'],
+                    'tenant_id': event['tenant_id'],
+                    'details': _loads_json(event['details'], {}),
+                    'ip_address': event['ip_address'],
+                    'user_agent': event['user_agent']
+                })
+            
+            grouped_events[tenant_id] = {
+                'tenant_id': tenant_id,
+                'event_count': tenant_count,
+                'events': formatted_events
+            }
+        
+        return {
+            'tenants': grouped_events,
+            'total_tenants': len(tenants),
+            'total_events': total_count,
+            'limit': limit,
+            'offset': offset
+        }
+
+
+def get_all_tenants_with_activity() -> list:
+    """Get list of all tenants that have audit activity."""
+    with get_db_context() as conn:
+        # Get tenants with audit activity
+        tenant_rows = conn.execute("""
+            SELECT DISTINCT COALESCE(tenant_id, 'system') as tenant_id 
+            FROM audit_history 
+            WHERE tenant_id IS NOT NULL OR tenant_id != ''
+            ORDER BY tenant_id
+        """).fetchall()
+        
+        tenants = []
+        for row in tenant_rows:
+            tenant_id = row['tenant_id']
+            if tenant_id and tenant_id != 'system':
+                # Get additional tenant info if available
+                tenant_info = conn.execute("""
+                    SELECT id, name, created_at 
+                    FROM tenants 
+                    WHERE id = ?
+                """, (tenant_id,)).fetchone()
+                
+                if tenant_info:
+                    tenants.append({
+                        'id': tenant_info['id'],
+                        'name': tenant_info['name'],
+                        'created_at': tenant_info['created_at'],
+                        'audit_count': 0  # Will be populated below
+                    })
+                else:
+                    tenants.append({
+                        'id': tenant_id,
+                        'name': tenant_id,  # Use ID as name if not found
+                        'created_at': None,
+                        'audit_count': 0
+                    })
+        
+        # Get activity count for each tenant
+        for tenant in tenants:
+            count_row = conn.execute("""
+                SELECT COUNT(*) as count 
+                FROM audit_history 
+                WHERE tenant_id = ?
+            """, (tenant['id'],)).fetchone()
+            tenant['audit_count'] = count_row['count'] if count_row else 0
+        
+        # Sort by activity count (descending)
+        tenants.sort(key=lambda t: t['audit_count'], reverse=True)
+        
+        return tenants

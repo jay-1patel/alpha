@@ -149,6 +149,12 @@ async def _handle_main_selection(wa_id: str, message: str, context: dict, cfg, t
             await send_text_message(wa_id, "The catalog is currently empty.")
         return {"new_state": cfg.B2B_MAIN_MENU_STATE}
 
+    if sel in ("menu_catalogue", "catalogue", "brochure"):
+        from . import catalog_flow
+        return await catalog_flow.handle_catalog_message(
+            wa_id, message, cfg.B2B_VIEW_CATALOG, context, tier
+        )
+
     if sel == "menu_new_arrivals" or sel in ("new arrivals",):
         from services.whatsapp_sender import send_new_arrivals_message
         sent = await send_new_arrivals_message(wa_id)
@@ -318,7 +324,7 @@ async def _handle_main_selection(wa_id: str, message: str, context: dict, cfg, t
         return {"new_state": cfg.B2B_MAIN_MENU_STATE}
 
     # -- Catalogue / Price list / Schemes ------------------------------------
-    if sel in ("download catalogue", "dist_download_catalog", "dist_catalogue", "catalogue", "catalog pdf"):
+    if sel in ("download catalogue", "dist_download_catalog", "dist_catalogue", "catalogue", "catalog pdf", "brochure"):
         from . import catalog_flow
         return await catalog_flow.handle_catalog_message(
             wa_id, message, cfg.B2B_VIEW_CATALOG, context, tier

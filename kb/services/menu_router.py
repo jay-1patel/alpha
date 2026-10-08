@@ -471,6 +471,11 @@ def action_for_option_id(msg_id: str, parsed_msg: dict = None) -> str:
                 "menu_new_arrivals": "NEW_ARRIVALS",
                 "menu_catalogue": "CATALOG",
                 "menu_catalog": "CATALOG",
+                # Service/travel tenant profiles use this ID for their
+                # brochure row.  Keep it equivalent to the older catalogue
+                # IDs so tapping the menu item follows the same delivery path
+                # as typing "brochure".
+                "menu_brochure": "CATALOG",
                 "menu_return_policy": "RETURN_POLICY",
                 "menu_shipping_policy": "SHIPPING_POLICY",
                 "menu_about": "ABOUT_COMPANY",

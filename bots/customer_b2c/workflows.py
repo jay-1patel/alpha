@@ -123,6 +123,13 @@ async def _handle_main_selection(wa_id: str, message: str, context: dict, cfg) -
             await send_text_message(wa_id, "The new arrivals PDF could not be delivered right now. Please try again shortly.")
         return {"new_state": cfg.B2C_MAIN_MENU_STATE}
 
+    if sel in ("catalogue", "catalog", "brochure", "menu_catalogue"):
+        from services.whatsapp_sender import send_catalogue_message
+        sent = await send_catalogue_message(wa_id)
+        if not sent:
+            await send_text_message(wa_id, "The catalogue PDF could not be delivered right now. Please try again shortly.")
+        return {"new_state": cfg.B2C_MAIN_MENU_STATE}
+
     if sel in ("products", "b2c_products", "browse", "product", "view products", "menu_products"):
         products = tools.list_products()
         if products:

@@ -39,6 +39,7 @@ from routes.inbox import router as inbox_router
 from routes.dynamic_config import router as dynamic_config_router
 from routes.orders import router as orders_router
 from routes.complaints import router as complaints_router
+from routes.audit import router as audit_router
 from services.handoff_timeout import handoff_timeout_monitor
 
 logging.basicConfig(level=logging.INFO)
@@ -168,6 +169,7 @@ app.include_router(inbox_router, tags=["inbox"])
 app.include_router(dynamic_config_router, tags=["dynamic-config"])
 app.include_router(orders_router, tags=["orders"])
 app.include_router(complaints_router, tags=["complaints"])
+app.include_router(audit_router, tags=["audit"])
 
 IMAGES_DIR = os.path.join(os.path.dirname(__file__), "images")
 if os.path.isdir(IMAGES_DIR):

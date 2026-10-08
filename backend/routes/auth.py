@@ -90,6 +90,7 @@ ALL_PERMISSIONS = {
     "view_inbox": "Live inbox",
     "view_campaigns": "Campaigns",
     "view_distributors": "Distributors",
+    "audit_history": "View audit history (superadmin only)",
 }
 
 SUPER_ADMIN_PERMISSIONS = {k: True for k in ALL_PERMISSIONS}
